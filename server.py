@@ -1,0 +1,456 @@
+#!/usr/bin/env python3
+"""
+GM Display Server
+Serves the GM Display web app and handles gm:// protocol requests.
+
+Architecture:
+  - Server runs on localhost:7680, serves the GM Display HTML app
+  - GM page stays open in one browser tab, polls /api/command for new commands
+  - Player window stays open on projector, syncs via BroadcastChannel
+  - gm:// clicks → macOS app → curl POST /api/command → GM page picks it up
+  - No new tabs ever spawned after initial open
+"""
+
+import http.server
+import os
+import sys
+import json
+import urllib.parse
+import webbrowser
+import threading
+import signal
+import subprocess
+import time
+
+PORT = 7680
+STATIC_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Directories where maps/images are stored (searched in order)
+IMAGE_ROOTS = []
+
+# Index: maps filename/partial-path → absolute path (built at startup)
+# Enables instant fallback when gm:// links use partial paths
+FILE_INDEX = {}  # "Dragonfall Maps/Map - The Bone Field.jpg" → "/full/path/..."
+
+# Pending command for the GM page to pick up
+pending_command = None
+command_lock = threading.Lock()
+
+
+class GMHandler(http.server.SimpleHTTPRequestHandler):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, directory=STATIC_DIR, **kwargs)
+
+    def do_GET(self):
+        parsed = urllib.parse.urlparse(self.path)
+
+        # Health check (used by menu bar app and build script)
+        if parsed.path == '/api/health':
+            health = {
+                'status': 'ok',
+                'roots': len(IMAGE_ROOTS),
+                'image_roots': IMAGE_ROOTS,
+                'port': PORT
+            }
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps(health).encode())
+            return
+
+        # Poll for pending commands (GM page calls this every 300ms)
+        if parsed.path == '/api/command':
+            global pending_command
+            with command_lock:
+                cmd = pending_command
+                pending_command = None  # consume it
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            if cmd:
+                self.wfile.write(json.dumps(cmd).encode())
+            else:
+                self.wfile.write(b'null')
+            return
+
+        # Serve map/image files from configured roots
+        if parsed.path.startswith('/maps/'):
+            rel_path = urllib.parse.unquote(parsed.path[6:])  # strip /maps/
+
+            # 1) Direct lookup against each root
+            for root in IMAGE_ROOTS:
+                full_path = os.path.join(root, rel_path)
+                if os.path.isfile(full_path):
+                    try:
+                        self.send_file(full_path)
+                    except Exception as e:
+                        print(f"Error serving {full_path}: {e}")
+                        self.send_error(500, f"Error serving file: {e}")
+                    return
+
+            # 2) Fallback: use the startup file index
+            #    Handles partial paths like "Dragonfall Maps/file.jpg" when the
+            #    actual vault path is "Darkmoon Vale/Dragonfall Maps/file.jpg"
+            index_key = rel_path.replace('\\', '/')
+            if index_key in FILE_INDEX:
+                print(f"🔍 Index match: {rel_path} → {FILE_INDEX[index_key]}")
+                try:
+                    self.send_file(FILE_INDEX[index_key])
+                except Exception as e:
+                    self.send_error(500, f"Error: {e}")
+                return
+
+            # 3) Try just the filename
+            basename = os.path.basename(rel_path)
+            if basename in FILE_INDEX:
+                print(f"🔍 Filename match: {basename} → {FILE_INDEX[basename]}")
+                try:
+                    self.send_file(FILE_INDEX[basename])
+                except Exception as e:
+                    self.send_error(500, f"Error: {e}")
+                return
+
+            # Nothing found — log diagnostics
+            print(f"\n❌ 404: '{rel_path}' not found. Tried:")
+            for root in IMAGE_ROOTS:
+                full = os.path.join(root, rel_path)
+                print(f"   {full}  {'✓ EXISTS' if os.path.isfile(full) else '✗'}")
+            print(f"   Index lookup for '{index_key}' — no match")
+            print(f"   Filename lookup for '{basename}' — no match")
+            print()
+            self.send_error(404, f"Image not found: {rel_path}")
+            return
+
+        # List available maps
+        if parsed.path == '/api/maps':
+            maps = []
+            for root in IMAGE_ROOTS:
+                for dirpath, _, filenames in os.walk(root):
+                    for f in filenames:
+                        if f.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.gif')):
+                            rel = os.path.relpath(os.path.join(dirpath, f), root)
+                            maps.append({'name': f, 'path': '/maps/' + urllib.parse.quote(rel)})
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps(maps).encode())
+            return
+
+        # Default: serve static files (no cache on HTML so updates appear immediately)
+        if parsed.path == '/' or parsed.path == '':
+            self.path = '/gm_display.html'
+
+        # For HTML files, serve with no-cache headers
+        if self.path.endswith('.html'):
+            file_path = os.path.join(STATIC_DIR, self.path.lstrip('/'))
+            if os.path.isfile(file_path):
+                with open(file_path, 'rb') as f:
+                    data = f.read()
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/html; charset=utf-8')
+                self.send_header('Content-Length', len(data))
+                self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
+                self.send_header('Pragma', 'no-cache')
+                self.end_headers()
+                self.wfile.write(data)
+                return
+
+        super().do_GET()
+
+    def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+
+        # Receive a command from the protocol handler
+        if parsed.path == '/api/command':
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_length).decode() if content_length else ''
+
+            # Parse command from body or query params
+            params = urllib.parse.parse_qs(parsed.query)
+            if body:
+                try:
+                    cmd = json.loads(body)
+                except json.JSONDecodeError:
+                    params.update(urllib.parse.parse_qs(body))
+                    cmd = None
+
+            # If JSON had a "url" field (from AppleScript handler), parse it
+            if cmd and 'url' in cmd and 'action' not in cmd:
+                cmd = parse_gm_url(cmd['url'])
+            elif not cmd:
+                url = params.get('url', [''])[0]
+                if url:
+                    cmd = parse_gm_url(url)
+                else:
+                    cmd = {
+                        'action': params.get('action', ['show'])[0],
+                        'file': params.get('file', [''])[0]
+                    }
+
+            global pending_command
+            with command_lock:
+                pending_command = cmd
+
+            print(f"📨 Command received: {json.dumps(cmd)}")
+
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps({'ok': True, 'command': cmd}).encode())
+            return
+
+        self.send_error(405)
+
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.end_headers()
+
+    def send_file(self, path):
+        ext = os.path.splitext(path)[1].lower()
+        mime_types = {
+            '.png': 'image/png',
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.gif': 'image/gif',
+            '.webp': 'image/webp',
+        }
+        mime = mime_types.get(ext, 'application/octet-stream')
+
+        with open(path, 'rb') as f:
+            data = f.read()
+        self.send_response(200)
+        self.send_header('Content-Type', mime)
+        self.send_header('Content-Length', len(data))
+        self.send_header('Cache-Control', 'max-age=3600')
+        self.end_headers()
+        self.wfile.write(data)
+
+    def log_message(self, format, *args):
+        # Quieter logging — only log errors
+        if args and '404' in str(args[0]):
+            super().log_message(format, *args)
+
+
+def parse_gm_url(url):
+    """Parse a gm://action/path URL into a command dict."""
+    parsed = urllib.parse.urlparse(url)
+    action = parsed.hostname  # 'show' or 'map'
+    file_path = urllib.parse.unquote(parsed.path.lstrip('/'))
+    return {
+        'action': action or 'show',
+        'file': f'/maps/{urllib.parse.quote(file_path)}'
+    }
+
+
+def send_command_to_server(url):
+    """Send a gm:// URL to the running server via HTTP POST."""
+    cmd = parse_gm_url(url)
+    try:
+        import urllib.request
+        data = json.dumps(cmd).encode()
+        req = urllib.request.Request(
+            f'http://localhost:{PORT}/api/command',
+            data=data,
+            headers={'Content-Type': 'application/json'},
+            method='POST'
+        )
+        urllib.request.urlopen(req, timeout=2)
+        return True
+    except Exception as e:
+        print(f"Failed to send command: {e}")
+        return False
+
+
+def main():
+    mode = 'server'  # default
+    open_browser = True
+    pending_url = None
+
+    # Parse args
+    for arg in sys.argv[1:]:
+        if arg == '--no-browser':
+            open_browser = False
+        elif arg.startswith('gm://'):
+            # Protocol handler mode: POST to running server, then exit
+            if send_command_to_server(arg):
+                return
+            else:
+                print("Server not running — starting it first")
+                mode = 'server_then_command'
+                pending_url = arg
+                break
+        elif os.path.isdir(arg):
+            IMAGE_ROOTS.append(os.path.abspath(arg))
+
+    def add_vault(vault_path):
+        """Add a vault root to IMAGE_ROOTS. gm:// links use vault-relative paths."""
+        if vault_path not in IMAGE_ROOTS:
+            IMAGE_ROOTS.append(vault_path)
+
+    # --- Primary detection: server.py lives INSIDE the vault at .tools/gm-display/
+    # so we can always find the vault by walking up from our own location ---
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    vault_from_script = os.path.dirname(os.path.dirname(script_dir))  # up from .tools/gm-display/
+
+    # Validate: if we're in an .app bundle, __file__ isn't in the vault
+    if '.app/Contents' not in script_dir and os.path.isdir(vault_from_script):
+        add_vault(vault_from_script)
+
+    # Direct vault paths — always try these (works from app bundle or anywhere)
+    home = os.path.expanduser('~')
+    for vault_name in ['Documents/Pathfinder', 'Documents/Obsidian Vault']:
+        vault_candidate = os.path.join(home, vault_name)
+        if os.path.isdir(vault_candidate):
+            add_vault(vault_candidate)
+
+    if not IMAGE_ROOTS:
+        # Fallback: look for common locations
+        candidates = [
+            os.path.join(home, 'Documents', 'RPG', 'Pathfinder 1e'),
+            os.path.join(home, 'Documents', 'RPG'),
+        ]
+        for c in candidates:
+            if os.path.isdir(c):
+                IMAGE_ROOTS.append(c)
+
+    if not IMAGE_ROOTS:
+        # Last resort: auto-detect vaults in ~/Documents by marker folders
+        for vault_parent in [
+            os.path.join(home, 'Documents'),
+            os.path.join(home, 'Obsidian'),
+            home,
+        ]:
+            if not os.path.isdir(vault_parent):
+                continue
+            try:
+                for entry in os.listdir(vault_parent):
+                    candidate = os.path.join(vault_parent, entry)
+                    if not os.path.isdir(candidate):
+                        continue
+                    if (os.path.isdir(os.path.join(candidate, '.obsidian'))
+                            or os.path.isdir(os.path.join(candidate, 'Darkmoon Vale'))):
+                        add_vault(candidate)
+            except PermissionError:
+                print(f"Warning: cannot scan {vault_parent} (permission denied, skipping)")
+
+    if not IMAGE_ROOTS:
+        print("\n⚠️  WARNING: No image directories found!")
+        print("   Maps and images won't load. Check that ~/Documents/Pathfinder exists.\n")
+    else:
+        print(f"\n✅ Image roots ({len(IMAGE_ROOTS)}):")
+        for r in IMAGE_ROOTS:
+            print(f"   {r}")
+        print()
+
+    # --- Build file index for instant fallback lookups ---
+    # This lets us find "Dragonfall Maps/file.jpg" even when the full vault
+    # path is "Darkmoon Vale/Dragonfall Maps/file.jpg"
+    IMAGE_EXTS = {'.png', '.jpg', '.jpeg', '.webp', '.gif'}
+    vault_root = IMAGE_ROOTS[0] if IMAGE_ROOTS else None
+    if vault_root:
+        try:
+            for dirpath, _, filenames in os.walk(vault_root):
+                for f in filenames:
+                    if os.path.splitext(f)[1].lower() in IMAGE_EXTS:
+                        full = os.path.join(dirpath, f)
+                        rel = os.path.relpath(full, vault_root)
+                        # Index by every possible tail of the path
+                        # e.g. "Darkmoon Vale/Dragonfall Maps/file.jpg"
+                        #   → also indexed as "Dragonfall Maps/file.jpg"
+                        #   → also indexed as "file.jpg"
+                        parts = rel.replace('\\', '/').split('/')
+                        for i in range(len(parts)):
+                            key = '/'.join(parts[i:])
+                            if key not in FILE_INDEX:  # first match wins
+                                FILE_INDEX[key] = full
+            print(f"📁 File index: {len(FILE_INDEX)} entries from {vault_root}")
+        except PermissionError:
+            print(f"⚠️  Cannot index {vault_root} (permission denied)")
+
+    # --- Kill anything on our port before binding ---
+    def kill_port(port):
+        """Kill any process holding our port. Returns True if something was killed."""
+        try:
+            result = subprocess.run(
+                ['lsof', '-ti', f':{port}'],
+                capture_output=True, text=True, timeout=3
+            )
+            pids = result.stdout.strip().split('\n')
+            pids = [p.strip() for p in pids if p.strip()]
+            if pids:
+                my_pid = str(os.getpid())
+                other_pids = [p for p in pids if p != my_pid]
+                if other_pids:
+                    print(f"Killing stale processes on port {port}: {', '.join(other_pids)}")
+                    for pid in other_pids:
+                        try:
+                            os.kill(int(pid), 9)  # SIGKILL — no mercy
+                        except (ProcessLookupError, PermissionError):
+                            pass
+                    time.sleep(0.5)
+                    return True
+        except Exception:
+            pass
+        return False
+
+    # --- Bind with retry ---
+    http.server.HTTPServer.allow_reuse_address = True
+    server = None
+    for attempt in range(5):
+        try:
+            server = http.server.HTTPServer(('127.0.0.1', PORT), GMHandler)
+            break
+        except OSError as e:
+            if 'Address already in use' in str(e):
+                if attempt == 0:
+                    kill_port(PORT)
+                else:
+                    print(f"   Port {PORT} still busy, retrying ({attempt+1}/5)...")
+                    time.sleep(1)
+            else:
+                raise
+
+    if server is None:
+        print(f"\n❌ Could not bind to port {PORT} after 5 attempts.")
+        print(f"   Run: kill -9 $(lsof -ti :{PORT})")
+        print(f"   Then try again.")
+        sys.exit(1)
+
+    print(f"🎲 GM Display Server running on http://localhost:{PORT}")
+    print(f"   Press Ctrl+C to stop\n")
+
+    # Handle clean shutdown — only on SIGINT (Ctrl+C)
+    # SIGTERM is logged but ignored (prevents gm:// handler from killing us)
+    def handle_sigint(sig, frame):
+        print("\nShutting down (Ctrl+C)...")
+        server.shutdown()
+        sys.exit(0)
+    def handle_sigterm(sig, frame):
+        print(f"\n⚠️  Ignoring SIGTERM (pid {os.getpid()}) — use Ctrl+C to stop the server")
+    signal.signal(signal.SIGINT, handle_sigint)
+    signal.signal(signal.SIGTERM, handle_sigterm)
+    # Ignore SIGPIPE (broken pipe from disconnected clients)
+    if hasattr(signal, 'SIGPIPE'):
+        signal.signal(signal.SIGPIPE, signal.SIG_IGN)
+
+    # Open browser to GM page (only on interactive start, not when launched by app)
+    if open_browser:
+        if mode in ('server', 'server_then_command'):
+            threading.Timer(0.5, lambda: webbrowser.open(f'http://localhost:{PORT}')).start()
+    if mode == 'server_then_command' and pending_url:
+        def delayed_command():
+            time.sleep(1)
+            send_command_to_server(pending_url)
+        threading.Thread(target=delayed_command, daemon=True).start()
+
+    server.serve_forever()
+
+
+if __name__ == '__main__':
+    main()

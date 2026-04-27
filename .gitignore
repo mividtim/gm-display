@@ -1,0 +1,13 @@
+# macOS
+.DS_Store
+*.app/
+
+# Python
+__pycache__/
+*.pyc
+
+# Logs
+*.log
+
+# Build artifacts
+/tmp/

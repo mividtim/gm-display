@@ -1,0 +1,1671 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>GM Display</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #1a1a1a;
+  color: #e0e0e0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  overflow: hidden;
+  height: 100vh;
+  user-select: none;
+}
+
+/* --- Mode: Image Display (GM preview) --- */
+#image-display {
+  display: none;
+  width: 100vw;
+  height: 100vh;
+  justify-content: center;
+  align-items: center;
+  background: #111;
+  position: relative;
+}
+#image-display img {
+  max-width: 90%;
+  max-height: 85%;
+  object-fit: contain;
+  border: 1px solid #333;
+}
+#image-info {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  background: rgba(30,30,30,0.92);
+  border: 1px solid #555;
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-size: 13px;
+  z-index: 1000;
+  backdrop-filter: blur(6px);
+}
+#image-info .filename { color: #aaa; margin-bottom: 4px; }
+#image-info .label { color: #6a4; font-weight: 500; }
+
+/* --- Mode: Fog of War (GM View) --- */
+#fog-gm {
+  display: none;
+  width: 100vw;
+  height: 100vh;
+  position: relative;
+}
+#gm-toolbar {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  z-index: 1000;
+  background: rgba(30,30,30,0.92);
+  border: 1px solid #555;
+  border-radius: 8px;
+  padding: 10px 14px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 13px;
+  backdrop-filter: blur(6px);
+  flex-wrap: wrap;
+  max-width: calc(100vw - 20px);
+}
+#gm-toolbar label { color: #ccc; }
+#gm-toolbar input[type=range] { width: 80px; }
+#gm-toolbar button {
+  background: #444;
+  border: 1px solid #666;
+  color: #eee;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+#gm-toolbar button:hover { background: #555; }
+#gm-toolbar button.active { background: #6a4; border-color: #8c6; color: #fff; }
+#gm-toolbar .sep { width: 1px; height: 20px; background: #555; }
+#brush-preview {
+  width: 24px; height: 24px;
+  border: 2px solid #aaa;
+  border-radius: 50%;
+  display: inline-block;
+}
+.toolbar-val { color: #888; font-size: 11px; min-width: 28px; text-align: center; }
+
+#gm-canvas-container {
+  width: 100%; height: 100%;
+  overflow: auto;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+#gm-canvas-wrap { position: relative; display: inline-block; overflow: visible; }
+#gm-map-canvas, #gm-fog-canvas { position: absolute; top: 0; left: 0; }
+#gm-map-canvas { position: relative; }
+
+/* Viewport outline on GM canvas (shows what projector sees) */
+#viewport-outline {
+  position: absolute;
+  border: 2px dashed #6a4;
+  pointer-events: none;
+  z-index: 10;
+  display: none;
+  box-shadow: 0 0 0 9999px rgba(0,0,0,0.25);
+}
+
+/* Crop panel */
+#crop-panel { top: 60px; right: 10px; width: 280px; display: none; }
+#crop-panel label { color: #ccc; font-size: 12px; display: block; margin-top: 6px; }
+#crop-panel input[type=range] { width: 100%; }
+#crop-panel .val { color: #888; font-size: 11px; float: right; }
+#crop-panel button {
+  background: #444; border: 1px solid #666; color: #eee;
+  padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;
+  margin-top: 4px;
+}
+
+/* Keystone corner controls */
+.corner-group { display: flex; align-items: center; gap: 4px; margin: 4px 0; }
+.corner-label { color: #aaa; font-size: 11px; width: 24px; text-align: right; }
+.corner-btn {
+  background: #444; border: 1px solid #555; color: #ddd;
+  width: 26px; height: 26px; border-radius: 3px; cursor: pointer;
+  font-size: 14px; line-height: 1; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+.corner-btn:hover { background: #555; }
+.corner-btn:active { background: #6a4; }
+.corner-vals { color: #888; font-size: 10px; min-width: 50px; text-align: center; }
+
+/* --- Panels --- */
+.tool-panel {
+  position: fixed;
+  background: rgba(30,30,30,0.95);
+  border: 1px solid #555;
+  border-radius: 8px;
+  padding: 12px;
+  z-index: 1000;
+  backdrop-filter: blur(6px);
+}
+#text-overlay-panel { bottom: 50px; right: 10px; width: 400px; max-height: 300px; display: none; }
+#text-overlay-panel textarea {
+  width: 100%; height: 120px;
+  background: #222; color: #eee;
+  border: 1px solid #444; border-radius: 4px;
+  padding: 8px;
+  font-family: Georgia, serif; font-size: 14px;
+  resize: vertical;
+}
+#text-overlay-panel .btn-row { display: flex; gap: 8px; margin-top: 8px; }
+#text-overlay-panel button {
+  background: #444; border: 1px solid #666; color: #eee;
+  padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 13px;
+}
+#text-overlay-panel button.primary { background: #6a4; border-color: #8c6; }
+
+/* Keystone + Grid panel */
+#projection-panel { bottom: 50px; left: 10px; width: 300px; display: none; }
+#projection-panel label { color: #ccc; font-size: 12px; display: block; margin-top: 8px; }
+#projection-panel input[type=range] { width: 100%; }
+#projection-panel .val { color: #888; font-size: 11px; float: right; }
+#projection-panel button {
+  background: #444; border: 1px solid #666; color: #eee;
+  padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;
+  margin-top: 4px;
+}
+
+/* --- Player View (separate window) --- */
+#player-view {
+  display: none;
+  width: 100vw; height: 100vh;
+  background: #000;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  overflow: hidden;
+}
+#player-canvas-wrap {
+  position: relative;
+  display: inline-block;
+  transform-origin: center center;
+}
+#player-canvas { background: #000; display: block; }
+#player-grid-canvas {
+  position: absolute; top: 0; left: 0;
+  pointer-events: none;
+}
+#player-text-overlay {
+  position: fixed;
+  bottom: 40px; left: 50%;
+  transform: translateX(-50%);
+  max-width: 80%;
+  background: rgba(0,0,0,0.85);
+  color: #f0e8d0;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 28px; line-height: 1.5;
+  padding: 24px 36px;
+  border: 2px solid #8b7355;
+  border-radius: 8px;
+  text-align: center;
+  display: none; z-index: 100;
+}
+#player-image {
+  max-width: 100%; max-height: 100%;
+  object-fit: contain;
+  display: none;
+}
+
+/* --- Landing --- */
+#landing {
+  display: flex; flex-direction: column;
+  justify-content: center; align-items: center;
+  height: 100vh; gap: 16px;
+}
+#landing h1 { font-size: 28px; font-weight: 300; color: #aaa; }
+#landing .subtitle { color: #666; font-size: 14px; margin-bottom: 10px; }
+.drop-zone {
+  width: 400px; height: 120px;
+  border: 2px dashed #555; border-radius: 12px;
+  display: flex; flex-direction: column;
+  justify-content: center; align-items: center;
+  cursor: pointer; transition: border-color 0.2s; gap: 8px;
+}
+.drop-zone:hover, .drop-zone.dragover { border-color: #6a4; }
+.drop-zone span { color: #888; font-size: 15px; }
+.drop-zone small { color: #555; font-size: 12px; }
+
+.btn { background:#333;border:1px solid #555;color:#ddd;padding:10px 24px;border-radius:6px;cursor:pointer;font-size:14px; }
+.btn:hover { background:#444;border-color:#888; }
+.btn-sm { padding:4px 12px;font-size:13px; }
+
+#mode-buttons { display: flex; gap: 12px; }
+
+.setup-row { display: flex; gap: 16px; align-items: stretch; }
+.setup-section {
+  background: #252525; border: 1px solid #444; border-radius: 8px;
+  padding: 16px 20px; text-align: center; min-width: 260px;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+}
+.setup-section h3 { font-size: 14px; color: #aaa; font-weight: 400; }
+.setup-section .status { font-size: 12px; }
+.status-off { color: #885; }
+.status-on { color: #6a4; }
+
+/* Thumbnail previews on landing */
+.thumb-wrap {
+  width: 220px; height: 130px;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 6px;
+  overflow: hidden;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+.thumb-wrap:hover { border-color: #6a4; }
+.thumb-wrap img {
+  max-width: 100%; max-height: 100%;
+  object-fit: contain;
+}
+.thumb-wrap .thumb-empty { color: #444; font-size: 12px; font-style: italic; }
+.thumb-wrap .thumb-label {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  background: rgba(0,0,0,0.7);
+  color: #aaa; font-size: 10px;
+  padding: 2px 6px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pulse { animation: pulse 2s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
+
+.instructions { color: #777; font-size: 13px; text-align: center; line-height: 1.6; max-width: 550px; }
+
+/* Status bar */
+#status-bar {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  background: rgba(20,20,20,0.9); color: #888;
+  font-size: 12px; padding: 4px 12px;
+  z-index: 2000; display: flex; justify-content: space-between;
+}
+
+.btn-home {
+  background: #335 !important;
+  border-color: #558 !important;
+}
+.btn-home:hover { background: #446 !important; }
+</style>
+</head>
+<body>
+
+<!-- Landing screen (GM page) -->
+<div id="landing">
+  <h1>GM Display</h1>
+  <div class="subtitle">Keep this tab open. Click gm:// links in Obsidian.</div>
+
+  <div class="setup-row">
+    <div class="setup-section">
+      <h3>Projector (Maps + Fog of War)</h3>
+      <button class="btn" onclick="openDisplay('map')">Open Map Display</button>
+      <div class="thumb-wrap" id="map-thumb-wrap" onclick="resumeFogMode()" title="Click to open fog-of-war controls">
+        <span class="thumb-empty" id="map-thumb-empty">No map loaded</span>
+        <img id="map-thumb" style="display:none">
+        <div class="thumb-label" id="map-thumb-label" style="display:none"></div>
+      </div>
+      <div class="status" id="map-status"><span class="status-off">not connected</span></div>
+    </div>
+    <div class="setup-section">
+      <h3>Sidecar (Art + Handouts)</h3>
+      <button class="btn" onclick="openDisplay('show')">Open Image Display</button>
+      <div class="thumb-wrap" id="show-thumb-wrap" onclick="resumeImageMode()" title="Click to preview current image">
+        <span class="thumb-empty" id="show-thumb-empty">No image loaded</span>
+        <img id="show-thumb" style="display:none">
+        <div class="thumb-label" id="show-thumb-label" style="display:none"></div>
+      </div>
+      <div class="status" id="show-status"><span class="status-off">not connected</span></div>
+    </div>
+  </div>
+
+  <div class="drop-zone" id="drop-zone">
+    <span>Or drop an image here</span>
+    <small>click to browse</small>
+  </div>
+  <input type="file" id="file-input" accept="image/*" style="display:none">
+  <div id="mode-buttons" style="display:none">
+    <button class="btn" onclick="startImageMode()">Show on Sidecar</button>
+    <button class="btn" onclick="startFogMode()">Fog of War on Projector</button>
+  </div>
+
+  <div class="instructions">
+    <strong>Setup:</strong> Open both displays, drag each to the right screen, F11 for fullscreen.<br>
+    <code>gm://map/...</code> links go to Projector &nbsp;|&nbsp; <code>gm://show/...</code> links go to Sidecar<br>
+    <span class="pulse" id="poll-indicator" style="color:#6a4;">Listening for commands...</span>
+  </div>
+</div>
+
+<!-- Image display mode (GM sees a preview) -->
+<div id="image-display">
+  <div id="image-info">
+    <div class="filename" id="img-filename"></div>
+    <div><span class="label" id="img-dest-label">Showing on sidecar</span></div>
+    <div style="margin-top:8px">
+      <button class="btn btn-sm btn-home" onclick="goHome()">Home</button>
+      <button class="btn btn-sm" onclick="goBack()">Back (Esc)</button>
+      <button class="btn btn-sm" onclick="toggleCropPanel()" id="btn-crop-img">Crop (C)</button>
+    </div>
+  </div>
+  <img id="display-image">
+</div>
+
+<!-- Fog of War: GM View -->
+<div id="fog-gm">
+  <div id="gm-toolbar">
+    <button class="btn-home" onclick="goHome()" style="background:#335;border:1px solid #558;color:#cdf;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px;" title="Return to landing page (fog state preserved)">Home</button>
+    <div class="sep"></div>
+    <button id="btn-reveal" class="active" onclick="setTool('reveal')">Reveal (R)</button>
+    <button id="btn-hide" onclick="setTool('hide')">Hide (H)</button>
+    <div class="sep"></div>
+    <label>Brush</label>
+    <input type="range" id="brush-size" min="5" max="200" value="40">
+    <div id="brush-preview"></div>
+    <div class="sep"></div>
+    <button onclick="revealAll()">Reveal All</button>
+    <button onclick="hideAll()">Hide All</button>
+    <div class="sep"></div>
+    <button onclick="toggleTextPanel()">Text (T)</button>
+    <button onclick="toggleProjectionPanel()" id="btn-projection">Projection (P)</button>
+    <div class="sep"></div>
+    <button onclick="toggleCropPanel()" id="btn-crop">Crop (C)</button>
+  </div>
+
+  <!-- Text overlay panel -->
+  <div id="text-overlay-panel" class="tool-panel">
+    <div style="color:#aaa;font-size:12px;margin-bottom:6px;">Text appears on projector overlay</div>
+    <textarea id="text-input" placeholder="Type read-aloud text here..."></textarea>
+    <div class="btn-row">
+      <button class="primary" onclick="showTextOnPlayer()">Show on Projector</button>
+      <button onclick="hideTextOnPlayer()">Hide Text</button>
+    </div>
+  </div>
+
+  <!-- Projection panel: 4-corner keystone + grid -->
+  <div id="projection-panel" class="tool-panel">
+    <div style="color:#aaa;font-size:12px;margin-bottom:4px;"><strong>4-Corner Keystone</strong></div>
+    <div style="color:#666;font-size:10px;margin-bottom:6px;">Nudge each corner. Hold Shift = 10px steps.</div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+      <div>
+        <div style="color:#6a4;font-size:11px;margin-bottom:2px;">Top-Left</div>
+        <div class="corner-group">
+          <button class="corner-btn" onclick="nudgeCorner('tl','x',-1)">◀</button>
+          <button class="corner-btn" onclick="nudgeCorner('tl','y',-1)">▲</button>
+          <button class="corner-btn" onclick="nudgeCorner('tl','y',1)">▼</button>
+          <button class="corner-btn" onclick="nudgeCorner('tl','x',1)">▶</button>
+          <span class="corner-vals" id="corner-tl-val">0,0</span>
+        </div>
+      </div>
+      <div>
+        <div style="color:#6a4;font-size:11px;margin-bottom:2px;">Top-Right</div>
+        <div class="corner-group">
+          <button class="corner-btn" onclick="nudgeCorner('tr','x',-1)">◀</button>
+          <button class="corner-btn" onclick="nudgeCorner('tr','y',-1)">▲</button>
+          <button class="corner-btn" onclick="nudgeCorner('tr','y',1)">▼</button>
+          <button class="corner-btn" onclick="nudgeCorner('tr','x',1)">▶</button>
+          <span class="corner-vals" id="corner-tr-val">0,0</span>
+        </div>
+      </div>
+      <div>
+        <div style="color:#6a4;font-size:11px;margin-bottom:2px;">Bottom-Left</div>
+        <div class="corner-group">
+          <button class="corner-btn" onclick="nudgeCorner('bl','x',-1)">◀</button>
+          <button class="corner-btn" onclick="nudgeCorner('bl','y',-1)">▲</button>
+          <button class="corner-btn" onclick="nudgeCorner('bl','y',1)">▼</button>
+          <button class="corner-btn" onclick="nudgeCorner('bl','x',1)">▶</button>
+          <span class="corner-vals" id="corner-bl-val">0,0</span>
+        </div>
+      </div>
+      <div>
+        <div style="color:#6a4;font-size:11px;margin-bottom:2px;">Bottom-Right</div>
+        <div class="corner-group">
+          <button class="corner-btn" onclick="nudgeCorner('br','x',-1)">◀</button>
+          <button class="corner-btn" onclick="nudgeCorner('br','y',-1)">▲</button>
+          <button class="corner-btn" onclick="nudgeCorner('br','y',1)">▼</button>
+          <button class="corner-btn" onclick="nudgeCorner('br','x',1)">▶</button>
+          <span class="corner-vals" id="corner-br-val">0,0</span>
+        </div>
+      </div>
+    </div>
+
+    <label>Scale <span class="val" id="scale-val">100%</span></label>
+    <input type="range" id="scale-slider" min="50" max="200" value="100" step="1"
+           oninput="updateScale(this.value)">
+
+    <div style="border-top:1px solid #444;margin-top:10px;padding-top:10px;">
+      <div style="color:#aaa;font-size:12px;margin-bottom:4px;"><strong>Grid Overlay</strong></div>
+
+      <label>Grid: <span class="val" id="grid-status">OFF</span></label>
+      <button onclick="toggleGrid()" id="btn-grid" style="margin-bottom:6px;">Toggle Grid (G)</button>
+
+      <label>Grid spacing (px) <span class="val" id="grid-px-val">50</span></label>
+      <input type="range" id="grid-px-slider" min="10" max="200" value="50" step="1"
+             oninput="updateGridSize(this.value)">
+
+      <label>Grid opacity <span class="val" id="grid-opacity-val">40%</span></label>
+      <input type="range" id="grid-opacity-slider" min="5" max="100" value="40" step="5"
+             oninput="updateGridOpacity(this.value)">
+
+      <label>Grid color</label>
+      <div style="display:flex;gap:4px;margin-top:4px;">
+        <button onclick="setGridColor('rgba(255,255,255,__A__)')" style="background:#ccc;color:#000;padding:2px 8px;">White</button>
+        <button onclick="setGridColor('rgba(0,0,0,__A__)')" style="background:#222;padding:2px 8px;">Black</button>
+        <button onclick="setGridColor('rgba(0,150,255,__A__)')" style="background:#09f;padding:2px 8px;">Blue</button>
+        <button onclick="setGridColor('rgba(255,50,50,__A__)')" style="background:#f33;padding:2px 8px;">Red</button>
+      </div>
+    </div>
+
+    <div style="margin-top:8px;">
+      <button onclick="resetProjection()">Reset All</button>
+    </div>
+  </div>
+
+  <div id="gm-canvas-container">
+    <div id="gm-canvas-wrap">
+      <canvas id="gm-map-canvas"></canvas>
+      <canvas id="gm-fog-canvas"></canvas>
+      <div id="viewport-outline"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Crop panel (top-level, works in both fog and image modes) -->
+<div id="crop-panel" class="tool-panel">
+  <div style="color:#aaa;font-size:12px;margin-bottom:4px;"><strong>Projector Crop</strong></div>
+  <div style="display:flex;gap:4px;margin-bottom:8px;">
+    <button onclick="cropFit()" id="btn-crop-fit" style="flex:1;background:#335;border:1px solid #558;color:#cdf;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:12px;">Fit (1)</button>
+    <button onclick="cropFill()" id="btn-crop-fill" style="flex:1;background:#444;border:1px solid #666;color:#eee;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:12px;">Fill (2)</button>
+  </div>
+  <label>Zoom <span class="val" id="crop-zoom-val">1.0x</span></label>
+  <input type="range" id="crop-zoom" min="100" max="1000" value="100" step="5" oninput="updateCrop()">
+  <label>H Position <span class="val" id="crop-hpos-val">50%</span></label>
+  <input type="range" id="crop-hpos" min="0" max="100" value="50" step="1" oninput="updateCrop()">
+  <label>V Position <span class="val" id="crop-vpos-val">50%</span></label>
+  <input type="range" id="crop-vpos" min="0" max="100" value="50" step="1" oninput="updateCrop()">
+</div>
+
+<!-- Player View (used for BOTH display types, differentiated by ?display= param) -->
+<div id="player-view">
+  <div id="player-canvas-wrap">
+    <canvas id="player-canvas"></canvas>
+    <canvas id="player-grid-canvas"></canvas>
+  </div>
+  <img id="player-image">
+  <div id="player-text-overlay"></div>
+</div>
+
+<div id="status-bar">
+  <span id="status-left">Ready</span>
+  <span id="status-right">GM Display v4.2</span>
+</div>
+
+<script>
+// === State ===
+let loadedImage = null;
+let fogMask = null;
+let fogImage = null;
+let mapWidth = 0, mapHeight = 0;
+let currentTool = 'reveal';
+let brushSize = 40;
+let painting = false;
+let currentMode = 'landing';
+let pollTimer = null;
+let fogInitialized = false;
+
+// Track what's currently on each display (for thumbnails)
+let lastMapSrc = null;
+let lastMapName = null;
+let lastShowSrc = null;
+let lastShowName = null;
+
+// Projection settings (sent to player)
+// 4-corner keystone: pixel offsets for each corner {x, y}
+let corners = { tl: {x:0,y:0}, tr: {x:0,y:0}, bl: {x:0,y:0}, br: {x:0,y:0} };
+let projScale = 100;     // scale percent
+let gridEnabled = false;
+let gridPx = 50;         // grid spacing in pixels
+let gridOpacity = 0.4;
+let gridColorTemplate = 'rgba(255,255,255,__A__)'; // __A__ replaced with opacity
+
+// Two separate channels: one per display
+let mapChannel = null;
+let showChannel = null;
+
+// Player view state (when this window IS a display)
+let isPlayerView = false;
+let playerDisplay = null;
+let playerChannel = null;
+
+// Crop state (what portion of the map the projector shows)
+let cropZoom = 1;     // 1 = full map, 2 = half size shown, etc.
+let cropHPos = 0.5;   // 0-1, center of crop horizontally
+let cropVPos = 0.5;   // 0-1, center of crop vertically
+let viewportCrop = null;  // computed {x,y,w,h} in map pixels, or null
+let projectorW = 1920;  // projector screen dimensions (updated by heartbeat)
+let projectorH = 1080;
+let sidecarW = 1920;    // sidecar screen dimensions (updated by heartbeat)
+let sidecarH = 1080;
+
+// Player-side: offscreen buffer for flicker-free rendering
+let offscreenCanvas = null;
+let offscreenCtx = null;
+let cachedMapImage = null;   // pre-loaded map image on player side
+let cachedMapSrc = null;
+
+// Player-side: projection state
+let pCorners = { tl: {x:0,y:0}, tr: {x:0,y:0}, bl: {x:0,y:0}, br: {x:0,y:0} };
+let pScale = 100;
+let pGridEnabled = false;
+let pGridPx = 50;
+let pGridOpacity = 0.4;
+let pGridColor = 'rgba(255,255,255,0.4)';
+// Player-side: cached fog data for crop-only updates
+let cachedFogData = null;
+
+// === Init ===
+function init() {
+  const params = new URLSearchParams(window.location.search);
+
+  if (params.get('mode') === 'player') {
+    isPlayerView = true;
+    playerDisplay = params.get('display') || 'map';
+    document.getElementById('landing').style.display = 'none';
+    document.getElementById('player-view').style.display = 'flex';
+    document.getElementById('status-bar').style.display = 'none';
+    document.title = playerDisplay === 'map' ? 'Projector (Maps)' : 'Sidecar (Images)';
+    setupPlayerChannel();
+    return;
+  }
+
+  // --- GM control page ---
+  const dropZone = document.getElementById('drop-zone');
+  const fileInput = document.getElementById('file-input');
+  dropZone.addEventListener('click', () => fileInput.click());
+  dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+  dropZone.addEventListener('drop', (e) => {
+    e.preventDefault(); dropZone.classList.remove('dragover');
+    if (e.dataTransfer.files.length) loadFile(e.dataTransfer.files[0]);
+  });
+  fileInput.addEventListener('change', (e) => { if (e.target.files.length) loadFile(e.target.files[0]); });
+
+  const brushEl = document.getElementById('brush-size');
+  if (brushEl) brushEl.addEventListener('input', (e) => { brushSize = parseInt(e.target.value); updateBrushPreview(); });
+  updateBrushPreview();
+
+  mapChannel = new BroadcastChannel('gm-display-map');
+  showChannel = new BroadcastChannel('gm-display-show');
+
+  mapChannel.onmessage = (e) => {
+    if (e.data.type === 'heartbeat') {
+      updateDisplayStatus('map', true);
+      if (e.data.screenW) {
+        const changed = (projectorW !== e.data.screenW || projectorH !== e.data.screenH);
+        projectorW = e.data.screenW; projectorH = e.data.screenH;
+        if (changed && currentMode === 'fog' && cropZoom > 1.01) {
+          computeViewportCrop();
+          updateViewportOutline();
+          sendCropUpdate();
+        }
+      }
+    }
+    if (e.data.type === 'request-sync') {
+      syncToMapDisplay();
+      sendProjectionSettings();
+    }
+  };
+  showChannel.onmessage = (e) => {
+    if (e.data.type === 'heartbeat') {
+      updateDisplayStatus('show', true);
+      if (e.data.screenW) {
+        const changed = (sidecarW !== e.data.screenW || sidecarH !== e.data.screenH);
+        sidecarW = e.data.screenW; sidecarH = e.data.screenH;
+        if (changed && currentMode === 'image' && cropZoom > 1.01) {
+          computeViewportCrop();
+          updateViewportOutline();
+          sendCropUpdate();
+        }
+      }
+    }
+    if (e.data.type === 'request-sync') {
+      // Re-send current sidecar image with crop
+      if (lastShowSrc) {
+        showChannel.postMessage({ type: 'show-image', imageSrc: lastShowSrc, crop: viewportCrop });
+      }
+    }
+  };
+
+  startPolling();
+
+  const action = params.get('action');
+  const filePath = params.get('file');
+  if (filePath) handleCommand({ action: action || 'show', file: filePath });
+}
+
+// === Display Status ===
+let mapConnected = false, showConnected = false;
+function updateDisplayStatus(which, connected) {
+  if (which === 'map') {
+    mapConnected = connected;
+    document.getElementById('map-status').innerHTML = connected
+      ? '<span class="status-on">connected</span>'
+      : '<span class="status-off">not connected</span>';
+  } else {
+    showConnected = connected;
+    document.getElementById('show-status').innerHTML = connected
+      ? '<span class="status-on">connected</span>'
+      : '<span class="status-off">not connected</span>';
+  }
+}
+
+// === Thumbnail Updates ===
+function updateMapThumbnail(src, name) {
+  lastMapSrc = src;
+  lastMapName = name || '';
+  const thumb = document.getElementById('map-thumb');
+  const empty = document.getElementById('map-thumb-empty');
+  const label = document.getElementById('map-thumb-label');
+  if (src) {
+    thumb.src = src;
+    thumb.style.display = 'block';
+    empty.style.display = 'none';
+    label.textContent = decodeURIComponent(name || '');
+    label.style.display = name ? 'block' : 'none';
+  }
+}
+
+function updateShowThumbnail(src, name) {
+  lastShowSrc = src;
+  lastShowName = name || '';
+  const thumb = document.getElementById('show-thumb');
+  const empty = document.getElementById('show-thumb-empty');
+  const label = document.getElementById('show-thumb-label');
+  if (src) {
+    thumb.src = src;
+    thumb.style.display = 'block';
+    empty.style.display = 'none';
+    label.textContent = decodeURIComponent(name || '');
+    label.style.display = name ? 'block' : 'none';
+  }
+}
+
+// === Open Display Windows ===
+function openDisplay(type) {
+  const url = window.location.pathname + '?mode=player&display=' + type;
+  const name = type === 'map' ? 'gm-projector' : 'gm-sidecar';
+  const w = window.open(url, name, 'width=1024,height=768,menubar=no,toolbar=no,location=no,status=no');
+  if (w) setStatus(`${type === 'map' ? 'Projector' : 'Sidecar'} window opened — drag to screen, F11 for fullscreen`);
+}
+
+// === Command Polling ===
+function startPolling() {
+  pollTimer = setInterval(async () => {
+    try {
+      const resp = await fetch('/api/command');
+      const cmd = await resp.json();
+      if (cmd) handleCommand(cmd);
+    } catch(e) {}
+  }, 300);
+}
+
+function handleCommand(cmd) {
+  const action = cmd.action || 'show';
+  const filePath = cmd.file;
+  if (!filePath) return;
+
+  const shortName = decodeURIComponent(filePath.split('/').pop());
+  console.log(`[GM Display] Command: ${action} -> ${filePath}`);
+  setStatus(`Received: ${action} ${shortName}`);
+
+  if (action === 'show') {
+    const img = new Image();
+    img.onload = () => {
+      loadedImage = img;
+      // Store image dimensions for crop calculations
+      mapWidth = img.width;
+      mapHeight = img.height;
+      if (showChannel) showChannel.postMessage({ type: 'show-image', imageSrc: img.src, crop: viewportCrop });
+      setStatus(`Sidecar: ${shortName}`);
+      updateShowThumbnail(img.src, shortName);
+      if (currentMode === 'landing') {
+        startImageMode(filePath);
+      }
+    };
+    img.onerror = () => setStatus(`Failed to load: ${filePath}`);
+    img.src = filePath;
+
+  } else if (action === 'map') {
+    setStatus(`Loading map: ${shortName}`);
+    const img = new Image();
+    img.onload = () => {
+      loadedImage = img;
+      fogImage = img;
+      updateMapThumbnail(img.src, shortName);
+      startFogMode();
+    };
+    img.onerror = () => { console.error(`Failed to load map: ${filePath}`); setStatus(`FAILED: ${filePath}`); };
+    img.src = filePath;
+  }
+}
+
+// === File Loading (drag & drop) ===
+function loadFile(file) {
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const img = new Image();
+    img.onload = () => {
+      loadedImage = img;
+      document.getElementById('mode-buttons').style.display = 'flex';
+      document.getElementById('drop-zone').innerHTML = `<span>${file.name}</span><small>${img.width} x ${img.height}</small>`;
+      setStatus(`Loaded: ${file.name}`);
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+// === Image Display Mode (-> sidecar) ===
+function startImageMode(filename) {
+  currentMode = 'image';
+  document.getElementById('landing').style.display = 'none';
+  document.getElementById('fog-gm').style.display = 'none';
+  document.getElementById('image-display').style.display = 'flex';
+  document.getElementById('display-image').src = loadedImage.src;
+
+  const shortName = (filename || 'file').split('/').pop().replace(/%20/g, ' ');
+  document.getElementById('img-filename').textContent = decodeURIComponent(shortName);
+  document.getElementById('img-dest-label').textContent = 'Showing on sidecar';
+  setStatus(`Image -> Sidecar: ${decodeURIComponent(shortName)}`);
+
+  if (showChannel) showChannel.postMessage({ type: 'show-image', imageSrc: loadedImage.src, crop: viewportCrop });
+}
+
+function resumeImageMode() {
+  if (!lastShowSrc) return;
+  currentMode = 'image';
+  document.getElementById('landing').style.display = 'none';
+  document.getElementById('fog-gm').style.display = 'none';
+  document.getElementById('image-display').style.display = 'flex';
+  document.getElementById('display-image').src = lastShowSrc;
+  document.getElementById('img-filename').textContent = lastShowName || '';
+  document.getElementById('img-dest-label').textContent = 'Showing on sidecar';
+  setStatus(`Previewing: ${lastShowName}`);
+}
+
+// === Fog of War Mode (-> projector) ===
+function startFogMode() {
+  currentMode = 'fog';
+  document.getElementById('landing').style.display = 'none';
+  document.getElementById('image-display').style.display = 'none';
+  document.getElementById('fog-gm').style.display = 'block';
+
+  const img = fogImage || loadedImage;
+  if (!img) return;
+
+  const isNewMap = (img.src !== lastMapSrc) || !fogInitialized;
+
+  if (isNewMap) {
+    fogImage = img;
+    mapWidth = img.width;
+    mapHeight = img.height;
+    fogMask = new Uint8Array(mapWidth * mapHeight);
+    fogInitialized = true;
+
+    // Reset crop for new map
+    resetCrop();
+
+    const mapCanvas = document.getElementById('gm-map-canvas');
+    const fogCanvas = document.getElementById('gm-fog-canvas');
+    mapCanvas.width = mapWidth; mapCanvas.height = mapHeight;
+    fogCanvas.width = mapWidth; fogCanvas.height = mapHeight;
+
+    mapCanvas.getContext('2d').drawImage(img, 0, 0);
+
+    fogCanvas.style.cursor = 'crosshair';
+    fogCanvas.onmousedown = (e) => { painting = true; paintAt(e); };
+    fogCanvas.onmousemove = (e) => { if (painting) paintAt(e); };
+    fogCanvas.onmouseup = () => { painting = false; syncToMapDisplay(); };
+    fogCanvas.onmouseleave = () => { if (painting) { painting = false; syncToMapDisplay(); } };
+
+    if (mapChannel) {
+      mapChannel.postMessage({ type: 'fog-init', imageSrc: img.src, width: mapWidth, height: mapHeight });
+      setTimeout(() => { syncToMapDisplay(); sendProjectionSettings(); }, 100);
+    }
+
+    updateMapThumbnail(img.src, lastMapName);
+  }
+
+  renderGMFog();
+  setStatus('Fog of War -> Projector. R/H = reveal/hide, C = crop, P = projection/grid');
+}
+
+function resumeFogMode() {
+  if (!fogInitialized || !fogImage) return;
+  currentMode = 'fog';
+  document.getElementById('landing').style.display = 'none';
+  document.getElementById('image-display').style.display = 'none';
+  document.getElementById('fog-gm').style.display = 'block';
+  renderGMFog();
+  setStatus('Fog of War -> Projector. R/H = reveal/hide, P = projection/grid');
+}
+
+function paintAt(e) {
+  const canvas = document.getElementById('gm-fog-canvas');
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = mapWidth / rect.width;
+  const scaleY = mapHeight / rect.height;
+  const cx = Math.floor((e.clientX - rect.left) * scaleX);
+  const cy = Math.floor((e.clientY - rect.top) * scaleY);
+  const r = Math.floor(brushSize * scaleX);
+  const val = currentTool === 'reveal' ? 255 : 0;
+
+  for (let dy = -r; dy <= r; dy++) {
+    for (let dx = -r; dx <= r; dx++) {
+      if (dx*dx + dy*dy <= r*r) {
+        const px = cx + dx, py = cy + dy;
+        if (px >= 0 && px < mapWidth && py >= 0 && py < mapHeight)
+          fogMask[py * mapWidth + px] = val;
+      }
+    }
+  }
+  renderGMFog();
+  if (!window._syncTimer) {
+    window._syncTimer = setTimeout(() => { syncToMapDisplay(); window._syncTimer = null; }, 50);
+  }
+}
+
+function renderGMFog() {
+  const canvas = document.getElementById('gm-fog-canvas');
+  const ctx = canvas.getContext('2d');
+  const imgData = ctx.createImageData(mapWidth, mapHeight);
+  const d = imgData.data;
+  for (let i = 0; i < fogMask.length; i++) {
+    if (fogMask[i] === 0) { const idx = i*4; d[idx]=0; d[idx+1]=0; d[idx+2]=0; d[idx+3]=160; }
+  }
+  ctx.putImageData(imgData, 0, 0);
+}
+
+function revealAll() { fogMask.fill(255); renderGMFog(); syncToMapDisplay(); }
+function hideAll() { fogMask.fill(0); renderGMFog(); syncToMapDisplay(); }
+
+function setTool(tool) {
+  currentTool = tool;
+  document.getElementById('btn-reveal').classList.toggle('active', tool === 'reveal');
+  document.getElementById('btn-hide').classList.toggle('active', tool === 'hide');
+}
+
+function updateBrushPreview() {
+  const el = document.getElementById('brush-preview');
+  if (el) { const s = Math.max(8, Math.min(40, brushSize*0.6)); el.style.width=s+'px'; el.style.height=s+'px'; }
+}
+
+// === Sync to Projector ===
+function syncToMapDisplay() {
+  if (!mapChannel || !fogMask || !fogImage) return;
+  // If viewport is locked, send the crop region.
+  // Otherwise send null (projector shows the full map).
+  const crop = viewportCrop; // null = full map, or {x,y,w,h} from crop sliders
+  mapChannel.postMessage({
+    type: 'fog-update',
+    imageSrc: fogImage.src,
+    fogMask: Array.from(fogMask),
+    width: mapWidth,
+    height: mapHeight,
+    crop: crop  // {x,y,w,h} in map pixels, or null
+  });
+}
+
+// === Projection Settings (GM -> Player) ===
+function sendProjectionSettings() {
+  if (!mapChannel) return;
+  mapChannel.postMessage({
+    type: 'projection',
+    corners: JSON.parse(JSON.stringify(corners)),
+    scale: projScale,
+    gridEnabled, gridPx, gridOpacity,
+    gridColor: gridColorTemplate.replace('__A__', gridOpacity)
+  });
+}
+
+// 4-corner keystone
+function nudgeCorner(corner, axis, dir) {
+  const step = window.event && window.event.shiftKey ? 10 : 1;
+  corners[corner][axis] += dir * step;
+  document.getElementById('corner-' + corner + '-val').textContent =
+    corners[corner].x + ',' + corners[corner].y;
+  sendProjectionSettings();
+}
+
+function updateScale(val) {
+  projScale = parseInt(val);
+  document.getElementById('scale-val').textContent = projScale + '%';
+  sendProjectionSettings();
+}
+function toggleGrid() {
+  gridEnabled = !gridEnabled;
+  document.getElementById('grid-status').textContent = gridEnabled ? 'ON' : 'OFF';
+  document.getElementById('btn-grid').classList.toggle('active', gridEnabled);
+  sendProjectionSettings();
+}
+function updateGridSize(val) {
+  gridPx = parseInt(val);
+  document.getElementById('grid-px-val').textContent = gridPx + 'px';
+  sendProjectionSettings();
+}
+function updateGridOpacity(val) {
+  gridOpacity = parseInt(val) / 100;
+  document.getElementById('grid-opacity-val').textContent = val + '%';
+  sendProjectionSettings();
+}
+function setGridColor(template) {
+  gridColorTemplate = template;
+  sendProjectionSettings();
+}
+function resetProjection() {
+  corners = { tl: {x:0,y:0}, tr: {x:0,y:0}, bl: {x:0,y:0}, br: {x:0,y:0} };
+  projScale = 100;
+  gridEnabled = false; gridPx = 50; gridOpacity = 0.4;
+  gridColorTemplate = 'rgba(255,255,255,__A__)';
+  document.getElementById('scale-slider').value = 100;
+  document.getElementById('grid-px-slider').value = 50;
+  document.getElementById('grid-opacity-slider').value = 40;
+  document.getElementById('scale-val').textContent = '100%';
+  document.getElementById('grid-px-val').textContent = '50px';
+  document.getElementById('grid-opacity-val').textContent = '40%';
+  document.getElementById('grid-status').textContent = 'OFF';
+  document.getElementById('btn-grid').classList.remove('active');
+  ['tl','tr','bl','br'].forEach(c =>
+    document.getElementById('corner-' + c + '-val').textContent = '0,0');
+  sendProjectionSettings();
+}
+
+// === Crop Sliders (controls what the projector shows) ===
+function toggleCropPanel() {
+  const p = document.getElementById('crop-panel');
+  p.style.display = p.style.display === 'none' ? 'block' : 'none';
+  const isOpen = p.style.display === 'block';
+  const btnFog = document.getElementById('btn-crop');
+  const btnImg = document.getElementById('btn-crop-img');
+  if (btnFog) btnFog.classList.toggle('active', isOpen);
+  if (btnImg) btnImg.classList.toggle('active', isOpen);
+  if (isOpen) {
+    document.getElementById('text-overlay-panel').style.display = 'none';
+    document.getElementById('projection-panel').style.display = 'none';
+  }
+}
+
+function cropFit() {
+  // Show the entire map — zoom 1x (default). Black bars fill gaps.
+  cropZoom = 1; cropHPos = 0.5; cropVPos = 0.5;
+  applyCropToSliders();
+  highlightCropButton('fit');
+}
+
+function cropFill() {
+  // Zoom so the map fills the screen completely (no black bars).
+  // Fill = largest screen-ratio rect that fits inside the map.
+  if (!mapWidth || !mapHeight) return;
+  const scrW = currentMode === 'image' ? sidecarW : projectorW;
+  const scrH = currentMode === 'image' ? sidecarH : projectorH;
+  const screenAspect = scrW / scrH;
+  const mapAspect = mapWidth / mapHeight;
+
+  // Fill dimensions: largest screen-ratio rect inside the map
+  let fillW, fillH;
+  if (screenAspect > mapAspect) {
+    fillW = mapWidth;
+    fillH = mapWidth / screenAspect;
+  } else {
+    fillH = mapHeight;
+    fillW = mapHeight * screenAspect;
+  }
+
+  // Solve for cropZoom: baseW / cropZoom = fillW
+  // baseW = sqrt(mapW * mapH * screenAspect)
+  const baseW = Math.sqrt(mapWidth * mapHeight * screenAspect);
+  cropZoom = baseW / fillW;
+
+  cropHPos = 0.5; cropVPos = 0.5;
+  applyCropToSliders();
+  highlightCropButton('fill');
+}
+
+function applyCropToSliders() {
+  const zoomPct = Math.round(cropZoom * 100);
+  document.getElementById('crop-zoom').value = Math.min(1000, zoomPct);
+  document.getElementById('crop-hpos').value = Math.round(cropHPos * 100);
+  document.getElementById('crop-vpos').value = Math.round(cropVPos * 100);
+  document.getElementById('crop-zoom-val').textContent = cropZoom.toFixed(1) + 'x';
+  document.getElementById('crop-hpos-val').textContent = Math.round(cropHPos * 100) + '%';
+  document.getElementById('crop-vpos-val').textContent = Math.round(cropVPos * 100) + '%';
+  computeViewportCrop();
+  updateViewportOutline();
+  sendCropUpdate();
+}
+
+function highlightCropButton(which) {
+  const fit = document.getElementById('btn-crop-fit');
+  const fill = document.getElementById('btn-crop-fill');
+  if (fit) { fit.style.background = which === 'fit' ? '#335' : '#444'; }
+  if (fill) { fill.style.background = which === 'fill' ? '#335' : '#444'; }
+}
+
+function updateCrop() {
+  cropZoom = parseInt(document.getElementById('crop-zoom').value) / 100;
+  cropHPos = parseInt(document.getElementById('crop-hpos').value) / 100;
+  cropVPos = parseInt(document.getElementById('crop-vpos').value) / 100;
+
+  document.getElementById('crop-zoom-val').textContent = cropZoom.toFixed(1) + 'x';
+  document.getElementById('crop-hpos-val').textContent = Math.round(cropHPos * 100) + '%';
+  document.getElementById('crop-vpos-val').textContent = Math.round(cropVPos * 100) + '%';
+
+  computeViewportCrop();
+  updateViewportOutline();
+  // Send lightweight crop-only update (no fog mask re-send)
+  sendCropUpdate();
+}
+
+function sendCropUpdate() {
+  // Send crop update only on the relevant channel for the current mode
+  if (currentMode === 'fog' && mapChannel) {
+    mapChannel.postMessage({ type: 'crop-update', crop: viewportCrop });
+  } else if (currentMode === 'image' && showChannel) {
+    showChannel.postMessage({ type: 'crop-update', crop: viewportCrop });
+  }
+}
+
+function computeViewportCrop() {
+  if (!mapWidth || !mapHeight) { viewportCrop = null; return; }
+
+  if (cropZoom <= 1.01) {
+    viewportCrop = null;
+    return;
+  }
+
+  // Viewport matches the target screen's aspect ratio.
+  // Area-based zoom: viewport area = (mapW * mapH) / zoom^2,
+  // shaped to match the screen aspect ratio.
+  const scrW = currentMode === 'image' ? sidecarW : projectorW;
+  const scrH = currentMode === 'image' ? sidecarH : projectorH;
+  const screenAspect = scrW / scrH;
+
+  // Base dimensions at zoom=1 (derived from area formula)
+  const baseW = Math.sqrt(mapWidth * mapHeight * screenAspect);
+  const baseH = Math.sqrt(mapWidth * mapHeight / screenAspect);
+
+  let w = baseW / cropZoom;
+  let h = baseH / cropZoom;
+
+  // Clamp viewport SIZE to map bounds (can't show more than the map)
+  if (w > mapWidth)  { w = mapWidth;  h = w / screenAspect; }
+  if (h > mapHeight) { h = mapHeight; w = h * screenAspect; }
+
+  w = Math.max(1, Math.floor(w));
+  h = Math.max(1, Math.floor(h));
+
+  // Position: allow panning past map edges so any area can be centered.
+  // At 50% = centered on map. 0%/100% = viewport extends half its size
+  // past the map edge, so edge content can be centered on screen.
+  // Range: x from -(w/2) to (mapWidth - w/2)
+  const rangeX = mapWidth;
+  const rangeY = mapHeight;
+  let x = Math.floor(cropHPos * rangeX - w / 2);
+  let y = Math.floor(cropVPos * rangeY - h / 2);
+
+  // Snap-to-edge: if within 15px of a clean alignment, snap to it
+  const snap = 15;
+  // Snap: left edge of map at left edge of viewport (x=0)
+  if (Math.abs(x) < snap) x = 0;
+  // Snap: right edge of map at right edge of viewport
+  if (Math.abs(x - (mapWidth - w)) < snap) x = mapWidth - w;
+  // Snap: top edge
+  if (Math.abs(y) < snap) y = 0;
+  // Snap: bottom edge
+  if (Math.abs(y - (mapHeight - h)) < snap) y = mapHeight - h;
+  // Snap: centered
+  const cx = Math.floor((mapWidth - w) / 2);
+  const cy = Math.floor((mapHeight - h) / 2);
+  if (Math.abs(x - cx) < snap) x = cx;
+  if (Math.abs(y - cy) < snap) y = cy;
+
+  viewportCrop = { x, y, w, h };
+}
+
+function resetCrop() {
+  cropZoom = 1; cropHPos = 0.5; cropVPos = 0.5;
+  const z = document.getElementById('crop-zoom');
+  const hp = document.getElementById('crop-hpos');
+  const vp = document.getElementById('crop-vpos');
+  if (z) z.value = 100;
+  if (hp) hp.value = 50;
+  if (vp) vp.value = 50;
+  const zv = document.getElementById('crop-zoom-val');
+  const hv = document.getElementById('crop-hpos-val');
+  const vv = document.getElementById('crop-vpos-val');
+  if (zv) zv.textContent = '1.0x';
+  if (hv) hv.textContent = '50%';
+  if (vv) vv.textContent = '50%';
+  viewportCrop = null;
+  updateViewportOutline();
+  sendCropUpdate();
+  setStatus('Crop reset — projector shows full map');
+}
+
+function updateViewportOutline() {
+  const outline = document.getElementById('viewport-outline');
+  if (!outline) return;
+  if (!viewportCrop) {
+    outline.style.display = 'none';
+    return;
+  }
+  outline.style.display = 'block';
+  outline.style.left = viewportCrop.x + 'px';
+  outline.style.top = viewportCrop.y + 'px';
+  outline.style.width = viewportCrop.w + 'px';
+  outline.style.height = viewportCrop.h + 'px';
+}
+
+// === Text Overlay ===
+function closeCropPanel() {
+  document.getElementById('crop-panel').style.display = 'none';
+  const btnFog = document.getElementById('btn-crop');
+  const btnImg = document.getElementById('btn-crop-img');
+  if (btnFog) btnFog.classList.remove('active');
+  if (btnImg) btnImg.classList.remove('active');
+}
+function toggleTextPanel() {
+  const p = document.getElementById('text-overlay-panel');
+  p.style.display = p.style.display === 'none' ? 'block' : 'none';
+  if (p.style.display === 'block') {
+    document.getElementById('projection-panel').style.display = 'none';
+    closeCropPanel();
+  }
+}
+function toggleProjectionPanel() {
+  const p = document.getElementById('projection-panel');
+  p.style.display = p.style.display === 'none' ? 'block' : 'none';
+  if (p.style.display === 'block') {
+    document.getElementById('text-overlay-panel').style.display = 'none';
+    closeCropPanel();
+  }
+}
+function showTextOnPlayer() {
+  const text = document.getElementById('text-input').value.trim();
+  if (text && mapChannel) mapChannel.postMessage({ type: 'show-text', text });
+}
+function hideTextOnPlayer() {
+  if (mapChannel) mapChannel.postMessage({ type: 'hide-text' });
+}
+
+// === Navigation ===
+function goHome() {
+  document.getElementById('fog-gm').style.display = 'none';
+  document.getElementById('image-display').style.display = 'none';
+  document.getElementById('text-overlay-panel').style.display = 'none';
+  document.getElementById('projection-panel').style.display = 'none';
+  document.getElementById('crop-panel').style.display = 'none';
+  document.getElementById('landing').style.display = 'flex';
+  document.getElementById('mode-buttons').style.display = loadedImage ? 'flex' : 'none';
+  const btnFog = document.getElementById('btn-crop');
+  const btnImg = document.getElementById('btn-crop-img');
+  if (btnFog) btnFog.classList.remove('active');
+  if (btnImg) btnImg.classList.remove('active');
+  currentMode = 'landing';
+}
+
+function goBack() { goHome(); }
+
+
+// ============================================================
+// === PLAYER VIEW (runs in display windows) ==================
+// ============================================================
+function setupPlayerChannel() {
+  const channelName = playerDisplay === 'map' ? 'gm-display-map' : 'gm-display-show';
+  playerChannel = new BroadcastChannel(channelName);
+
+  // Request full state sync on initial load (not just resize)
+  setTimeout(() => playerChannel.postMessage({ type: 'request-sync' }), 500);
+
+  setInterval(() => playerChannel.postMessage({
+    type: 'heartbeat',
+    screenW: window.innerWidth,
+    screenH: window.innerHeight
+  }), 2000);
+
+  playerChannel.onmessage = (e) => {
+    const d = e.data;
+    if (d.type === 'heartbeat') return;
+
+    // --- Image display (sidecar) ---
+    if (d.type === 'show-image') {
+      document.getElementById('player-text-overlay').style.display = 'none';
+      // Cache image source for crop updates
+      cachedMapSrc = d.imageSrc;
+      const tempImg = new Image();
+      tempImg.onload = () => {
+        cachedMapImage = tempImg;
+        renderPlayerImage(tempImg, d.crop);
+      };
+      tempImg.src = d.imageSrc;
+    }
+
+    // --- Fog of war (projector) ---
+    if (d.type === 'fog-init') {
+      document.getElementById('player-image').style.display = 'none';
+      const wrap = document.getElementById('player-canvas-wrap');
+      wrap.style.display = 'inline-block';
+      const canvas = document.getElementById('player-canvas');
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      // Pre-cache the map image
+      cachedMapSrc = d.imageSrc;
+      cachedMapImage = new Image();
+      cachedMapImage.src = d.imageSrc;
+    }
+
+    if (d.type === 'fog-update') {
+      console.log('[Player] fog-update received. Map:', d.width, 'x', d.height,
+        'fog entries:', d.fogMask?.length, 'crop:', JSON.stringify(d.crop));
+      document.getElementById('player-image').style.display = 'none';
+      const wrap = document.getElementById('player-canvas-wrap');
+      wrap.style.display = 'inline-block';
+      // Cache the fog data so crop-only updates can re-render without re-sending mask
+      cachedFogData = d;
+      renderPlayerFogDoubleBuffered(d);
+    }
+
+    // --- Crop-only update (lightweight, no fog mask) ---
+    if (d.type === 'crop-update') {
+      console.log('[Player] crop-update received:', JSON.stringify(d.crop),
+        'cachedFogData:', !!cachedFogData, 'cachedMapImage:', !!cachedMapImage);
+      if (cachedFogData) {
+        // Fog-of-war mode: re-render with new crop
+        cachedFogData.crop = d.crop;
+        renderPlayerFogDoubleBuffered(cachedFogData);
+      } else if (cachedMapImage && cachedMapImage.complete) {
+        // Image mode: re-render with new crop
+        renderPlayerImage(cachedMapImage, d.crop);
+      } else {
+        console.warn('[Player] crop-update ignored — no cached data. Player needs a full sync.');
+        playerChannel.postMessage({ type: 'request-sync' });
+      }
+    }
+
+    // --- Projection settings (4-corner keystone) ---
+    if (d.type === 'projection') {
+      pCorners = d.corners || { tl:{x:0,y:0}, tr:{x:0,y:0}, bl:{x:0,y:0}, br:{x:0,y:0} };
+      pScale = d.scale || 100;
+      pGridEnabled = d.gridEnabled || false;
+      pGridPx = d.gridPx || 50;
+      pGridOpacity = d.gridOpacity || 0.4;
+      pGridColor = d.gridColor || 'rgba(255,255,255,0.4)';
+      applyProjectionTransform();
+      drawGrid();
+    }
+
+    // --- Text overlay ---
+    if (d.type === 'show-text') {
+      const ov = document.getElementById('player-text-overlay');
+      ov.textContent = d.text;
+      ov.style.display = 'block';
+    }
+    if (d.type === 'hide-text') {
+      document.getElementById('player-text-overlay').style.display = 'none';
+    }
+
+    if (d.type === 'clear') {
+      document.getElementById('player-image').style.display = 'none';
+      document.getElementById('player-canvas-wrap').style.display = 'none';
+      document.getElementById('player-text-overlay').style.display = 'none';
+    }
+  };
+}
+
+// === Crop overlap helper (handles out-of-bounds crop positions) ===
+// Given a crop rect {x,y,w,h} that may extend past the source image,
+// returns the visible overlap: source rect and destination offset.
+// Returns null if there's no overlap at all.
+function computeCropOverlap(crop, imgW, imgH) {
+  const cx = crop.x, cy = crop.y, cw = crop.w, ch = crop.h;
+
+  // Intersection of crop rect with image bounds
+  const left   = Math.max(0, cx);
+  const top    = Math.max(0, cy);
+  const right  = Math.min(imgW, cx + cw);
+  const bottom = Math.min(imgH, cy + ch);
+
+  const srcW = right - left;
+  const srcH = bottom - top;
+  if (srcW <= 0 || srcH <= 0) return null;
+
+  return {
+    srcX: left,             // source image x
+    srcY: top,              // source image y
+    srcW: srcW,             // source width
+    srcH: srcH,             // source height
+    dstX: left - cx,        // destination x offset within the crop viewport
+    dstY: top - cy          // destination y offset within the crop viewport
+  };
+}
+
+// === Image rendering (sidecar, supports crop with overshoot) ===
+function renderPlayerImage(img, crop) {
+  const playerImg = document.getElementById('player-image');
+  const wrap = document.getElementById('player-canvas-wrap');
+  const canvas = document.getElementById('player-canvas');
+
+  if (!crop) {
+    // No crop — just show the image as-is
+    wrap.style.display = 'none';
+    playerImg.style.display = 'block';
+    playerImg.src = img.src;
+    return;
+  }
+
+  // Crop mode — render to canvas (handles out-of-bounds crop positions)
+  playerImg.style.display = 'none';
+  wrap.style.display = 'inline-block';
+
+  const wW = window.innerWidth, wH = window.innerHeight;
+  const scale = Math.min(wW / crop.w, wH / crop.h);
+  const cW = Math.floor(crop.w * scale);
+  const cH = Math.floor(crop.h * scale);
+
+  canvas.width = cW;
+  canvas.height = cH;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, cW, cH);
+
+  // Compute overlap between crop rect and image bounds
+  const ol = computeCropOverlap(crop, img.width, img.height);
+  if (ol) {
+    // Draw the visible portion at the correct canvas offset
+    ctx.drawImage(img,
+      ol.srcX, ol.srcY, ol.srcW, ol.srcH,
+      ol.dstX * scale, ol.dstY * scale, ol.srcW * scale, ol.srcH * scale);
+  }
+}
+
+// === Double-buffered fog rendering (no flicker!) ===
+function renderPlayerFogDoubleBuffered(data) {
+  const canvas = document.getElementById('player-canvas');
+  const wW = window.innerWidth, wH = window.innerHeight;
+
+  // Determine source region: cropped viewport or full map
+  const crop = data.crop; // {x, y, w, h} in map pixels, or null/undefined
+  const srcW = crop ? crop.w : data.width;
+  const srcH = crop ? crop.h : data.height;
+  const srcX = crop ? crop.x : 0;
+  const srcY = crop ? crop.y : 0;
+
+  // Scale the source region to fill the projector screen
+  const scale = Math.min(wW / srcW, wH / srcH);
+  const cW = Math.floor(srcW * scale);
+  const cH = Math.floor(srcH * scale);
+
+  // Create or resize offscreen buffer
+  if (!offscreenCanvas || offscreenCanvas.width !== cW || offscreenCanvas.height !== cH) {
+    offscreenCanvas = document.createElement('canvas');
+    offscreenCanvas.width = cW;
+    offscreenCanvas.height = cH;
+    offscreenCtx = offscreenCanvas.getContext('2d');
+  }
+
+  const doRender = (img) => {
+    const ctx = offscreenCtx;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, cW, cH);
+
+    // Draw the cropped region — handles out-of-bounds crop positions
+    const ol = crop ? computeCropOverlap(crop, data.width, data.height) : null;
+    if (crop && ol) {
+      ctx.drawImage(img,
+        ol.srcX, ol.srcY, ol.srcW, ol.srcH,
+        ol.dstX * scale, ol.dstY * scale, ol.srcW * scale, ol.srcH * scale);
+    } else if (!crop) {
+      ctx.drawImage(img, 0, 0, data.width, data.height, 0, 0, cW, cH);
+    }
+
+    // Apply fog mask (offset into the mask by crop position)
+    const imgData = ctx.getImageData(0, 0, cW, cH);
+    const px = imgData.data;
+    const mask = data.fogMask;
+    for (let y = 0; y < cH; y++) {
+      for (let x = 0; x < cW; x++) {
+        // Map back to mask coordinates
+        const mapX = srcX + Math.floor(x / scale);
+        const mapY = srcY + Math.floor(y / scale);
+        if (mapX < 0 || mapX >= data.width || mapY < 0 || mapY >= data.height) {
+          // Out of bounds = black (already black from fillRect)
+          const i = (y * cW + x) * 4;
+          px[i] = 0; px[i+1] = 0; px[i+2] = 0; px[i+3] = 255;
+        } else if (mask[mapY * data.width + mapX] === 0) {
+          const i = (y * cW + x) * 4;
+          px[i] = 0; px[i+1] = 0; px[i+2] = 0; px[i+3] = 255;
+        }
+      }
+    }
+    ctx.putImageData(imgData, 0, 0);
+
+    // === SWAP: single, atomic draw to visible canvas ===
+    canvas.width = cW;
+    canvas.height = cH;
+    const visCtx = canvas.getContext('2d');
+    visCtx.drawImage(offscreenCanvas, 0, 0);
+
+    // Redraw grid on top
+    drawGrid();
+  };
+
+  if (cachedMapImage && cachedMapImage.complete && cachedMapSrc === data.imageSrc) {
+    doRender(cachedMapImage);
+  } else {
+    cachedMapSrc = data.imageSrc;
+    cachedMapImage = new Image();
+    cachedMapImage.onload = () => doRender(cachedMapImage);
+    cachedMapImage.src = data.imageSrc;
+  }
+}
+
+// === 4-Corner Perspective Transform ===
+// Computes a CSS matrix3d from 4 corner offsets to warp the projection
+function applyProjectionTransform() {
+  const wrap = document.getElementById('player-canvas-wrap');
+  if (!wrap) return;
+
+  const canvas = document.getElementById('player-canvas');
+  if (!canvas) return;
+  const w = canvas.width || canvas.clientWidth || 800;
+  const h = canvas.height || canvas.clientHeight || 600;
+
+  const c = pCorners;
+  const hasKeystone = c.tl.x || c.tl.y || c.tr.x || c.tr.y ||
+                      c.bl.x || c.bl.y || c.br.x || c.br.y;
+
+  if (!hasKeystone && pScale === 100) {
+    wrap.style.transform = 'none';
+    return;
+  }
+
+  let transform = '';
+  if (pScale !== 100) transform += `scale(${pScale / 100}) `;
+
+  if (hasKeystone) {
+    // Source corners (original rectangle)
+    const src = [[0, 0], [w, 0], [0, h], [w, h]];
+    // Destination corners (adjusted by offsets)
+    const dst = [
+      [c.tl.x, c.tl.y],
+      [w + c.tr.x, c.tr.y],
+      [c.bl.x, h + c.bl.y],
+      [w + c.br.x, h + c.br.y]
+    ];
+    const matrix = computeMatrix3d(src, dst);
+    if (matrix) transform += `matrix3d(${matrix})`;
+  }
+
+  wrap.style.transformOrigin = '0 0';
+  wrap.style.transform = transform.trim() || 'none';
+}
+
+// Compute CSS matrix3d from 4 source→destination point pairs
+// Uses general projective (homography) transform
+function computeMatrix3d(src, dst) {
+  // src/dst: [[x0,y0], [x1,y1], [x2,y2], [x3,y3]]
+  // Solve for 3x3 projective matrix H where H * src_i = dst_i (homogeneous)
+  // Then embed in 4x4 for CSS matrix3d
+
+  const s = src, d = dst;
+
+  // Build 8x8 system: for each point pair, 2 equations
+  // x'*(h31*x + h32*y + h33) = h11*x + h12*y + h13
+  // y'*(h31*x + h32*y + h33) = h21*x + h22*y + h23
+  // Rewrite as Ah = 0 where h = [h11..h33] (h33=1)
+  // Actually solve as 8x8 linear system with h33=1
+
+  const A = [];
+  const b = [];
+  for (let i = 0; i < 4; i++) {
+    const sx = s[i][0], sy = s[i][1];
+    const dx = d[i][0], dy = d[i][1];
+    A.push([sx, sy, 1, 0, 0, 0, -dx*sx, -dx*sy]);
+    b.push(dx);
+    A.push([0, 0, 0, sx, sy, 1, -dy*sx, -dy*sy]);
+    b.push(dy);
+  }
+
+  // Solve via Gaussian elimination
+  const n = 8;
+  const M = A.map((row, i) => [...row, b[i]]);
+
+  for (let col = 0; col < n; col++) {
+    // Partial pivoting
+    let maxRow = col;
+    for (let row = col + 1; row < n; row++) {
+      if (Math.abs(M[row][col]) > Math.abs(M[maxRow][col])) maxRow = row;
+    }
+    [M[col], M[maxRow]] = [M[maxRow], M[col]];
+
+    if (Math.abs(M[col][col]) < 1e-10) return null; // singular
+
+    for (let row = col + 1; row < n; row++) {
+      const f = M[row][col] / M[col][col];
+      for (let j = col; j <= n; j++) M[row][j] -= f * M[col][j];
+    }
+  }
+
+  // Back substitution
+  const h = new Array(n);
+  for (let i = n - 1; i >= 0; i--) {
+    h[i] = M[i][n];
+    for (let j = i + 1; j < n; j++) h[i] -= M[i][j] * h[j];
+    h[i] /= M[i][i];
+  }
+
+  // h = [h11, h12, h13, h21, h22, h23, h31, h32], h33 = 1
+  // 3x3 matrix H:
+  // h[0] h[1] h[2]
+  // h[3] h[4] h[5]
+  // h[6] h[7] 1
+
+  // CSS matrix3d is column-major 4x4:
+  // a1 a2 a3 a4     col1: x
+  // b1 b2 b3 b4     col2: y
+  // c1 c2 c3 c4     col3: z
+  // d1 d2 d3 d4     col4: w
+  //
+  // For 2D projective transform, embed 3x3 into 4x4:
+  // H11 H21 0 H31
+  // H12 H22 0 H32
+  // 0   0   1 0
+  // H13 H23 0 H33
+
+  return [
+    h[0], h[3], 0, h[6],
+    h[1], h[4], 0, h[7],
+    0,    0,    1, 0,
+    h[2], h[5], 0, 1
+  ].join(',');
+}
+
+// === Grid Overlay ===
+function drawGrid() {
+  const gridCanvas = document.getElementById('player-grid-canvas');
+  if (!gridCanvas) return;
+  const mapCanvas = document.getElementById('player-canvas');
+  if (!mapCanvas) return;
+
+  // Match grid canvas to map canvas size
+  gridCanvas.width = mapCanvas.width;
+  gridCanvas.height = mapCanvas.height;
+  gridCanvas.style.width = mapCanvas.style.width || mapCanvas.width + 'px';
+  gridCanvas.style.height = mapCanvas.style.height || mapCanvas.height + 'px';
+
+  const ctx = gridCanvas.getContext('2d');
+  ctx.clearRect(0, 0, gridCanvas.width, gridCanvas.height);
+
+  if (!pGridEnabled || pGridPx < 5) return;
+
+  ctx.strokeStyle = pGridColor;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+
+  // Vertical lines
+  for (let x = pGridPx; x < gridCanvas.width; x += pGridPx) {
+    ctx.moveTo(x + 0.5, 0);
+    ctx.lineTo(x + 0.5, gridCanvas.height);
+  }
+  // Horizontal lines
+  for (let y = pGridPx; y < gridCanvas.height; y += pGridPx) {
+    ctx.moveTo(0, y + 0.5);
+    ctx.lineTo(gridCanvas.width, y + 0.5);
+  }
+
+  ctx.stroke();
+}
+
+// === Keyboard Shortcuts ===
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
+  if (e.key === 'Escape') goHome();
+  if (e.key === 'r') setTool('reveal');
+  if (e.key === 'h') setTool('hide');
+  if (e.key === 't') toggleTextPanel();
+  if (e.key === 'p') toggleProjectionPanel();
+  if (e.key === 'c' && (currentMode === 'fog' || currentMode === 'image')) toggleCropPanel();
+  if (e.key === '1' && (currentMode === 'fog' || currentMode === 'image')) cropFit();
+  if (e.key === '2' && (currentMode === 'fog' || currentMode === 'image')) cropFill();
+  if (e.key === 'g' && currentMode === 'fog') toggleGrid();
+  if (e.key === '[') { brushSize = Math.max(5, brushSize-10); const el=document.getElementById('brush-size'); if(el) el.value=brushSize; updateBrushPreview(); }
+  if (e.key === ']') { brushSize = Math.min(200, brushSize+10); const el=document.getElementById('brush-size'); if(el) el.value=brushSize; updateBrushPreview(); }
+});
+
+window.addEventListener('resize', () => {
+  if (isPlayerView && playerChannel) playerChannel.postMessage({ type: 'request-sync' });
+});
+
+function setStatus(msg) { const el = document.getElementById('status-left'); if (el) el.textContent = msg; }
+
+init();
+</script>
+</body>
+</html>
