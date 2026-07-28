@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>GM Display</title>
+<link rel="stylesheet" href="css/gm-display.css">
+</head>
+<body>
+
+<div id="app">
+
+<aside id="sidebar">
+<button id="sidebar-collapse-btn" onclick="toggleSidebarCollapsed()" title="Collapse / expand sidebar (drag the right edge to resize)">◀</button>
+<div id="sidebar-resize-handle" title="Drag to resize sidebar"></div>
+<div id="sidebar-content">
+
+  <div id="sidebar-header">
+    <h1>GM Display</h1>
+    <div class="pulse-row pulse" id="poll-indicator">Listening for commands…</div>
+    <div id="game-switcher" style="margin-top:10px;">
+      <div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1.2px;margin-bottom:4px;">Campaign</div>
+      <div style="display:flex;gap:4px;align-items:center;">
+        <select id="campaign-select" onchange="onCampaignSelectChange(this.value)"
+                title="Tokens are shared across all modules in a campaign"
+                style="flex:1;background:#222;color:#eee;border:1px solid #444;border-radius:4px;padding:4px 6px;font-size:12px;cursor:pointer;"></select>
+        <button onclick="newCampaignPrompt()" title="Create a new campaign"
+                style="background:#444;border:1px solid #666;color:#eee;width:26px;height:26px;border-radius:4px;cursor:pointer;font-size:14px;line-height:1;padding:0;">+</button>
+      </div>
+      <div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1.2px;margin:6px 0 4px;">Module</div>
+      <div style="display:flex;gap:4px;align-items:center;">
+        <select id="game-select" onchange="onGameSelectChange(this.value)"
+                style="flex:1;background:#222;color:#eee;border:1px solid #444;border-radius:4px;padding:4px 6px;font-size:12px;cursor:pointer;"></select>
+        <button onclick="newGamePrompt()" title="Create a new module in this campaign"
+                style="background:#444;border:1px solid #666;color:#eee;width:26px;height:26px;border-radius:4px;cursor:pointer;font-size:14px;line-height:1;padding:0;">+</button>
+      </div>
+      <div style="display:flex;gap:4px;margin-top:4px;">
+        <button onclick="renameActiveGame()" title="Rename the active module"
+                style="flex:1;background:#2a2a2a;border:1px solid #444;color:#bbb;padding:3px 6px;border-radius:3px;cursor:pointer;font-size:10px;">Rename</button>
+        <button onclick="moveModulePrompt()" title="Move this module to another campaign"
+                style="flex:1;background:#2a2a2a;border:1px solid #444;color:#bbb;padding:3px 6px;border-radius:3px;cursor:pointer;font-size:10px;">Move</button>
+        <button onclick="deleteActiveGame()" title="Delete the active module and its maps, fog, and settings"
+                style="flex:1;background:#2a2a2a;border:1px solid #444;color:#bbb;padding:3px 6px;border-radius:3px;cursor:pointer;font-size:10px;">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <details class="sb-section" open>
+    <summary>Displays</summary>
+    <div class="sb-body">
+      <div style="display:flex;gap:8px;">
+        <div style="flex:1;min-width:0;">
+          <button class="btn" onclick="openDisplay('map')" style="width:100%;font-size:11px;padding:6px;">Open Projector</button>
+          <div class="status" id="map-status" style="text-align:center;font-size:10px;margin-top:4px;"><span class="status-off">not connected</span></div>
+        </div>
+        <div style="flex:1;min-width:0;">
+          <button class="btn" onclick="openDisplay('show')" style="width:100%;font-size:11px;padding:6px;">Open Sidecar</button>
+          <div class="status" id="show-status" style="text-align:center;font-size:10px;margin-top:4px;"><span class="status-off">not connected</span></div>
+        </div>
+      </div>
+      <!-- Per-display thumbnails removed: live state is now indicated by the
+           PROJ/SIDE badge color on each Library card (saturated when live on
+           that display, dimmed otherwise). Legacy thumb DOM kept hidden so
+           updateMapThumbnail / updateShowThumbnail calls don't error. -->
+      <div style="display:none;">
+        <div id="map-thumb-wrap"><img id="map-thumb"><span id="map-thumb-empty">No map</span><div id="map-thumb-label"></div></div>
+        <div id="show-thumb-wrap"><img id="show-thumb"><span id="show-thumb-empty">No image</span><div id="show-thumb-label"></div></div>
+      </div>
+      <div style="font-size:10px;color:#666;margin-top:8px;line-height:1.4;">
+        <code style="background:#222;padding:1px 4px;border-radius:3px;">gm://map/…</code> → Projector<br>
+        <code style="background:#222;padding:1px 4px;border-radius:3px;">gm://show/…</code> → Sidecar
+      </div>
+    </div>
+  </details>
+
+  <details class="sb-section" open>
+    <summary>Library</summary>
+    <div class="sb-body">
+      <div class="drop-zone" id="drop-zone" style="width:100%;height:60px;font-size:11px;margin-bottom:8px;">
+        <span>Drop image here</span>
+        <small>or click to browse</small>
+      </div>
+      <input type="file" id="file-input" accept="image/*" style="display:none">
+
+      <!-- Add artwork: pick from vault or upload a file, choosing map vs image -->
+      <div style="border:1px solid #333;border-radius:4px;padding:6px;margin-bottom:8px;">
+        <div style="font-size:11px;color:#aaa;margin-bottom:4px;">Add artwork</div>
+        <div style="display:flex;gap:4px;margin-bottom:4px;">
+          <select id="art-vault-select" style="flex:1;min-width:0;background:#222;color:#eee;border:1px solid #444;border-radius:3px;padding:4px;font-size:11px;">
+            <option value="">Choose from vault…</option>
+          </select>
+          <button onclick="refreshArtVaultOptions()" title="Reload images from your vault" style="padding:4px 6px;">↻</button>
+        </div>
+        <div style="display:flex;gap:4px;align-items:center;">
+          <select id="art-type" title="Where this artwork displays" style="flex:1;background:#222;color:#eee;border:1px solid #444;border-radius:3px;padding:4px;font-size:11px;">
+            <option value="map">Map → Projector</option>
+            <option value="image">Image → Sidecar</option>
+          </select>
+          <button class="primary" onclick="addArtFromVault()" style="background:#6a4;border-color:#8c6;color:#fff;">+ Add</button>
+          <button onclick="document.getElementById('art-file-input').click()" title="Upload an image file into the vault">Upload…</button>
+          <input type="file" id="art-file-input" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none">
+        </div>
+      </div>
+
+      <div id="mode-buttons" style="display:none;flex-direction:column;gap:4px;margin-bottom:8px;">
+        <button class="btn" onclick="startImageMode()" style="font-size:11px;padding:5px;">Show on Sidecar</button>
+        <button class="btn" onclick="switchToMapFog()" style="font-size:11px;padding:5px;">Fog of War on Projector</button>
+      </div>
+      <div id="library-wrap" style="display:none;">
+        <div id="library-list" style="display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-start;"></div>
+      </div>
+      <!-- Legacy containers retained for backward-compat with anything still referencing them; kept hidden. -->
+      <div id="map-library" style="display:none;"><div id="map-library-list"></div></div>
+      <div id="image-library" style="display:none;"><div id="image-library-list"></div></div>
+    </div>
+  </details>
+
+  <!-- Active Entry section removed — the badge liveness on the Library card
+       already shows what's active. The DOM elements that other code reads or
+       writes (img-filename, img-dest-label, image-info) are kept hidden below
+       so existing call sites still find them. -->
+  <div style="display:none;">
+    <div id="image-info">
+      <div class="filename" id="img-filename"></div>
+      <span class="label" id="img-dest-label"></span>
+    </div>
+  </div>
+
+  <details class="sb-section">
+    <summary>Fog Tools</summary>
+    <div class="sb-body">
+      <div id="gm-toolbar">
+        <!-- Map Fog / Image Fog buttons removed: the active library entry IS
+             the editing target. Click an entry to switch what you're editing. -->
+        <div class="row" style="width:100%;">
+          <button id="btn-reveal" class="active" onclick="setTool('reveal')">Reveal (R)</button>
+          <button id="btn-hide" onclick="setTool('hide')">Hide (H)</button>
+        </div>
+        <label style="margin-top:8px;">Brush</label>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <input type="range" id="brush-size" min="5" max="200" value="40" style="flex:1;">
+          <div id="brush-preview"></div>
+        </div>
+        <div class="row" style="margin-top:6px;width:100%;">
+          <button onclick="revealAll()">Reveal All</button>
+          <button onclick="hideAll()">Hide All</button>
+        </div>
+        <div class="row" style="margin-top:6px;width:100%;">
+          <button id="btn-fog-undo" onclick="fogUndo()" disabled title="Undo (Cmd+Z)">Undo</button>
+          <button id="btn-fog-redo" onclick="fogRedo()" disabled title="Redo (Cmd+Shift+Z)">Redo</button>
+        </div>
+        <div class="row" style="margin-top:6px;width:100%;">
+          <button id="btn-live-sync" onclick="toggleLiveSync()" class="active" title="When ON, fog and map changes push to projector immediately">Live</button>
+          <button id="btn-sync-now" onclick="syncNow()" style="display:none;" title="Push current map and fog to projector">Sync Now</button>
+        </div>
+      </div>
+    </div>
+  </details>
+
+  <details class="sb-section" open>
+    <summary>View</summary>
+    <div class="sb-body">
+      <div id="crop-panel">
+        <!-- Rotation -->
+        <div style="color:#aaa;font-size:12px;margin-bottom:4px;"><strong>Rotation</strong> <span class="val" id="rotation-val">0°</span></div>
+        <div class="rotation-row">
+          <button onclick="rotateBy(-90)" title="Rotate active display 90° counter-clockwise">↺ 90°</button>
+          <button onclick="rotateBy(90)" title="Rotate active display 90° clockwise">↻ 90°</button>
+          <button onclick="setRotation(180)" title="Flip active display 180°">180°</button>
+          <button onclick="setRotation(0)" title="Reset active display rotation">Reset</button>
+        </div>
+
+        <!-- Zoom — slider + Fit/Fill presets + ± steps + numeric input. -->
+        <div style="color:#aaa;font-size:12px;margin:10px 0 4px;"><strong>Zoom</strong> <span class="val" id="crop-zoom-val">1.00x</span></div>
+        <div class="row" style="width:100%;margin-bottom:6px;">
+          <button onclick="cropFit()" id="btn-crop-fit" style="background:#335;border:1px solid #558;color:#cdf;">Fit (1)</button>
+          <button onclick="cropFill()" id="btn-crop-fill">Fill (2)</button>
+          <button onclick="zoomBy(-0.05)" title="Zoom out 5%">−</button>
+          <button onclick="zoomBy(0.05)" title="Zoom in 5%">+</button>
+        </div>
+        <input type="range" id="crop-zoom" min="10" max="1000" value="100" step="1" oninput="updateCrop()" style="width:100%;">
+        <input type="number" id="crop-zoom-input" min="10" max="1000" step="1" placeholder="zoom %" oninput="setZoomPercent(this.value)" style="width:100%;background:#222;color:#eee;border:1px solid #444;border-radius:3px;padding:4px;margin-top:4px;">
+
+        <!-- Pan — joystick only (1 px cursor = 1 px pan). No sliders. -->
+        <div style="color:#aaa;font-size:12px;margin:10px 0 4px;"><strong>Pan</strong> <span class="val" id="crop-pan-val">center</span></div>
+        <div style="display:flex; justify-content:center; padding:6px 0;">
+          <div id="pan-drag" class="pan-drag" title="Click and drag to pan. 1px of cursor movement = 1px of map pan.">⊕</div>
+        </div>
+
+        <!-- Background applies to whichever target the active entry uses. -->
+        <div style="color:#aaa;font-size:12px;margin:10px 0 4px;"><strong>Background</strong></div>
+        <input type="color" id="map-bg-color" value="#000000" oninput="setBg(this.value)" style="width:100%;height:30px;border:1px solid #555;background:#222;cursor:pointer;">
+        <div style="display:flex;gap:4px;margin-top:6px;">
+          <button onclick="setBg('#000000')" style="flex:1;background:#000;color:#888;border:1px solid #555;">Black</button>
+          <button onclick="setBg('#ffffff')" style="flex:1;background:#fff;color:#000;border:1px solid #888;">White</button>
+          <button onclick="setBg('#222222')" style="flex:1;background:#222;color:#ccc;border:1px solid #555;">Dark</button>
+          <button onclick="setBg('#888888')" style="flex:1;background:#888;color:#000;border:1px solid #aaa;">Gray</button>
+        </div>
+
+        <!-- Hidden range elements kept for backward compat with
+             applyCropToSliders / updateCrop / setRotation, which read from
+             these DOM IDs. The visible controls above drive the same state.
+             (crop-zoom is now the visible slider; the previous hidden duplicate
+             was removed.) -->
+        <input type="range" id="crop-hpos" min="0" max="100" value="50" step="0.1" oninput="updateCrop()" style="display:none;">
+        <input type="range" id="crop-vpos" min="0" max="100" value="50" step="0.1" oninput="updateCrop()" style="display:none;">
+        <input type="range" id="rotation-slider" min="0" max="359" value="0" step="1" oninput="setRotation(this.value)" style="display:none;">
+        <span class="val" id="crop-hpos-val" style="display:none;">50.0%</span>
+        <span class="val" id="crop-vpos-val" style="display:none;">50.0%</span>
+      </div>
+    </div>
+  </details>
+
+  <details class="sb-section" id="section-projector-adjustments">
+    <summary>Projector Alignment</summary>
+    <div class="sb-body">
+      <div id="projection-panel">
+        <div style="color:#aaa;font-size:12px;margin-bottom:4px;"><strong>4-Corner Keystone</strong></div>
+        <div style="color:#666;font-size:10px;margin-bottom:6px;">Drag pads to move corners. Arrows: 1px (Shift=10px).</div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          <div>
+            <div style="color:#6a4;font-size:11px;margin-bottom:2px;">Top-Left</div>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <div class="corner-drag" data-corner="tl" title="Drag to move corner">+</div>
+              <div>
+                <div class="corner-group">
+                  <button class="corner-btn" onclick="nudgeCorner('tl','x',-1)">◀</button>
+                  <button class="corner-btn" onclick="nudgeCorner('tl','y',-1)">▲</button>
+                  <button class="corner-btn" onclick="nudgeCorner('tl','y',1)">▼</button>
+                  <button class="corner-btn" onclick="nudgeCorner('tl','x',1)">▶</button>
+                </div>
+                <div style="display:flex;align-items:center;gap:4px;">
+                  <div class="corner-vals" id="corner-tl-val">0,0</div>
+                  <button class="corner-btn" onclick="resetCorner('tl')" title="Reset to 0,0" style="font-size:11px;">⟲</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div style="color:#6a4;font-size:11px;margin-bottom:2px;">Top-Right</div>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <div class="corner-drag" data-corner="tr" title="Drag to move corner">+</div>
+              <div>
+                <div class="corner-group">
+                  <button class="corner-btn" onclick="nudgeCorner('tr','x',-1)">◀</button>
+                  <button class="corner-btn" onclick="nudgeCorner('tr','y',-1)">▲</button>
+                  <button class="corner-btn" onclick="nudgeCorner('tr','y',1)">▼</button>
+                  <button class="corner-btn" onclick="nudgeCorner('tr','x',1)">▶</button>
+                </div>
+                <div style="display:flex;align-items:center;gap:4px;">
+                  <div class="corner-vals" id="corner-tr-val">0,0</div>
+                  <button class="corner-btn" onclick="resetCorner('tr')" title="Reset to 0,0" style="font-size:11px;">⟲</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div style="color:#6a4;font-size:11px;margin-bottom:2px;">Bottom-Left</div>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <div class="corner-drag" data-corner="bl" title="Drag to move corner">+</div>
+              <div>
+                <div class="corner-group">
+                  <button class="corner-btn" onclick="nudgeCorner('bl','x',-1)">◀</button>
+                  <button class="corner-btn" onclick="nudgeCorner('bl','y',-1)">▲</button>
+                  <button class="corner-btn" onclick="nudgeCorner('bl','y',1)">▼</button>
+                  <button class="corner-btn" onclick="nudgeCorner('bl','x',1)">▶</button>
+                </div>
+                <div style="display:flex;align-items:center;gap:4px;">
+                  <div class="corner-vals" id="corner-bl-val">0,0</div>
+                  <button class="corner-btn" onclick="resetCorner('bl')" title="Reset to 0,0" style="font-size:11px;">⟲</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div style="color:#6a4;font-size:11px;margin-bottom:2px;">Bottom-Right</div>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <div class="corner-drag" data-corner="br" title="Drag to move corner">+</div>
+              <div>
+                <div class="corner-group">
+                  <button class="corner-btn" onclick="nudgeCorner('br','x',-1)">◀</button>
+                  <button class="corner-btn" onclick="nudgeCorner('br','y',-1)">▲</button>
+                  <button class="corner-btn" onclick="nudgeCorner('br','y',1)">▼</button>
+                  <button class="corner-btn" onclick="nudgeCorner('br','x',1)">▶</button>
+                </div>
+                <div style="display:flex;align-items:center;gap:4px;">
+                  <div class="corner-vals" id="corner-br-val">0,0</div>
+                  <button class="corner-btn" onclick="resetCorner('br')" title="Reset to 0,0" style="font-size:11px;">⟲</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top:8px;">
+          <button onclick="toggleTestPattern()" id="btn-test-pattern" style="width:100%;padding:6px;font-size:12px;">Test Pattern (white + grid)</button>
+        </div>
+
+        <!-- Output scale (separate from cropZoom). Used together with the
+             corner controls to fit the keystone-corrected output to the
+             projector screen. Most users leave this at 100%. -->
+        <div style="border-top:1px solid #444;margin-top:10px;padding-top:10px;">
+          <label>Output Scale <span class="val" id="scale-val">100%</span></label>
+          <input type="range" id="scale-slider" min="50" max="200" value="100" step="1" oninput="updateScale(this.value)">
+        </div>
+
+        <!-- Screen-space alignment grid. NOT the map grid: drawn in projector
+             pixels, it does not track the map, so it only helps square the
+             projector to the table. -->
+        <div style="border-top:1px solid #444;margin-top:10px;padding-top:10px;">
+          <div style="color:#aaa;font-size:12px;margin-bottom:2px;"><strong>Alignment grid</strong></div>
+          <div style="color:#666;font-size:10px;margin-bottom:6px;">
+            Fixed squares in projector pixels, for squaring the projector to the table.
+            It does not move with the map — for a grid locked to the map use <em>Map Grid</em>.
+          </div>
+<label>Grid: <span class="val" id="grid-status">OFF</span></label>
+      <button onclick="toggleGrid()" id="btn-grid" style="margin-bottom:6px;">Toggle Grid (G)</button>
+      <label>Grid spacing (px) <span class="val" id="grid-px-val">50</span></label>
+      <input type="range" id="grid-px-slider" min="10" max="200" value="50" step="1" oninput="updateGridSize(this.value)">
+      <label>Grid opacity <span class="val" id="grid-opacity-val">40%</span></label>
+      <input type="range" id="grid-opacity-slider" min="5" max="100" value="40" step="5" oninput="updateGridOpacity(this.value)">
+      <label>Grid color</label>
+      <div style="display:flex;gap:4px;margin-top:4px;">
+        <button onclick="setGridColor('rgba(255,255,255,__A__)')" style="background:#ccc;color:#000;padding:2px 8px;">White</button>
+        <button onclick="setGridColor('rgba(0,0,0,__A__)')" style="background:#222;padding:2px 8px;">Black</button>
+        <button onclick="setGridColor('rgba(0,150,255,__A__)')" style="background:#09f;padding:2px 8px;">Blue</button>
+        <button onclick="setGridColor('rgba(255,50,50,__A__)')" style="background:#f33;padding:2px 8px;">Red</button>
+      </div>
+        </div>
+
+        <div style="margin-top:8px;">
+          <button onclick="resetProjection()" style="width:100%;">Reset Keystone</button>
+        </div>
+      </div>
+    </div>
+  </details>
+
+
+
+
+
+  <details class="sb-section" id="section-mapkey">
+    <summary>Map Grid</summary>
+    <div class="sb-body" id="mapkey-panel">
+      <div style="font-size:11px;color:#888;margin-bottom:8px;">
+        The grid locked to the map — what tokens snap to, drawn on every screen.
+        Calibrate it against a grid already printed on the map. Saved per map.
+      </div>
+        <label>Snap grid: <span class="val" id="tokgrid-status">ON</span></label>
+        <div style="display:flex;gap:4px;margin-bottom:6px;">
+          <button onclick="toggleTokenGrid()" id="btn-tokgrid" class="active" style="flex:1;">Toggle Snap Grid</button>
+        </div>
+        <input type="hidden" id="tokgrid-cells" value="24"><span id="tokgrid-cells-val" style="display:none;">24</span>
+        <label>Grid color &amp; opacity</label>
+        <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px;">
+          <input type="color" id="tokgrid-color" value="#78c8ff" oninput="setTokenGridColor()" title="Grid line color" style="width:34px;height:26px;border:1px solid #555;background:#222;cursor:pointer;padding:0;">
+          <input type="range" id="tokgrid-opacity" min="10" max="100" value="50" step="5" oninput="setTokenGridColor()" title="Grid opacity" style="flex:1;">
+        </div>
+        <div style="font-size:11px;color:#888;margin-top:4px;">Grid is drawn on every screen — players see it even inside fog, so they can place and move tokens in the dark.</div>
+
+      <div style="border-top:1px solid #333;padding-top:8px;margin-top:8px;">
+        <div style="color:#aaa;font-size:12px;margin-bottom:6px;"><strong>Calibration</strong></div>
+  <label>Shape</label>
+        <div style="display:flex;gap:4px;margin-bottom:6px;">
+          <button onclick="setKeyShape('square')"  id="btn-key-square"  style="flex:1;">Square ⬛</button>
+          <button onclick="setKeyShape('hex')"     id="btn-key-hex"     style="flex:1;" title="Pointy-top hexes">Hex ⬡</button>
+          <button onclick="setKeyShape('hexflat')" id="btn-key-hexflat" style="flex:1;" title="Flat-top hexes">Hex ⬢</button>
+        </div>
+
+        <label id="key-cell-label">Cell size (map px) <span class="val" id="key-cell-val">—</span></label>
+        <input type="range" id="key-cell" min="8" max="400" value="64" step="0.5" oninput="setKeyCell(this.value)">
+        <div style="display:flex;gap:4px;margin-bottom:6px;">
+          <button onclick="nudgeKeyCell(-1)" style="flex:1;">−1</button>
+          <button onclick="nudgeKeyCell(-0.1)" style="flex:1;">−0.1</button>
+          <button onclick="nudgeKeyCell(0.1)" style="flex:1;">+0.1</button>
+          <button onclick="nudgeKeyCell(1)" style="flex:1;">+1</button>
+        </div>
+        <label>Cells across map</label>
+          <input type="number" id="key-across" min="1" max="400" step="0.01" value=""
+                 oninput="setKeyAcross(this.value)"
+                 style="width:100%;background:#222;color:#eee;border:1px solid #555;padding:3px 6px;margin-bottom:6px;">
+          <span id="key-across-val" style="display:none;"></span>
+
+        <div id="key-rowh-wrap">
+          <label style="margin-top:8px;">
+            <input type="checkbox" id="key-link" checked onchange="toggleKeyLink()" style="width:auto;vertical-align:-2px;">
+            <span id="key-link-label">Square cells (row height = cell size)</span>
+          </label>
+          <div id="key-rowh-controls" style="display:none;">
+            <label id="key-celly-label">Row height (map px) <span class="val" id="key-celly-val">—</span></label>
+            <input type="range" id="key-celly" min="8" max="400" value="64" step="0.5" oninput="setKeyCellY(this.value)">
+            <div style="display:flex;gap:4px;margin-bottom:4px;">
+              <button onclick="nudgeKeyCellY(-1)" style="flex:1;">−1</button>
+              <button onclick="nudgeKeyCellY(-0.1)" style="flex:1;">−0.1</button>
+              <button onclick="nudgeKeyCellY(0.1)" style="flex:1;">+0.1</button>
+              <button onclick="nudgeKeyCellY(1)" style="flex:1;">+1</button>
+            </div>
+            <div style="font-size:11px;color:#888;margin-bottom:4px;" id="key-aspect-note"></div>
+          </div>
+        </div>
+
+        <label style="margin-top:8px;">Offset X <span class="val" id="key-ox-val">0</span></label>
+        <input type="range" id="key-ox" min="-200" max="200" value="0" step="0.5" oninput="setKeyOx(this.value)">
+        <label>Offset Y <span class="val" id="key-oy-val">0</span></label>
+        <input type="range" id="key-oy" min="-200" max="200" value="0" step="0.5" oninput="setKeyOy(this.value)">
+        <div style="display:flex;gap:4px;margin-bottom:6px;">
+          <button onclick="nudgeKeyOrigin(-1,0)" style="flex:1;" title="Arrow keys nudge too, while this panel is open">←</button>
+          <button onclick="nudgeKeyOrigin(1,0)" style="flex:1;">→</button>
+          <button onclick="nudgeKeyOrigin(0,-1)" style="flex:1;">↑</button>
+          <button onclick="nudgeKeyOrigin(0,1)" style="flex:1;">↓</button>
+        </div>
+        <button onclick="resetMapKey()">Reset calibration</button>
+        <div style="font-size:11px;color:#888;margin-top:6px;">
+          With this panel open, arrow keys nudge the origin by 1px (Shift ×10, Alt ×0.1).
+        </div>
+      </div>
+    </div>
+  </details>
+
+  <details class="sb-section" id="section-tokens" open>
+    <summary>Tokens</summary>
+    <div class="sb-body">
+      <div style="color:#aaa;font-size:11px;margin-bottom:6px;">Tokens appear on the projector and on players' web view. Players claim one and propose moves; you approve. Positions, visibility, and the NPC list are saved per map; the roster is shared campaign-wide.</div>
+
+      <!-- Create -->
+      <div style="display:flex;gap:4px;align-items:center;margin-bottom:4px;">
+        <input type="text" id="tok-name" placeholder="Token name (e.g. Goblin)" style="flex:1;background:#222;color:#eee;border:1px solid #444;border-radius:3px;padding:5px;font-size:12px;">
+        <input type="color" id="tok-color" value="#c0392b" title="Token color" style="width:30px;height:28px;border:1px solid #555;background:#222;cursor:pointer;padding:0;">
+      </div>
+      <div style="display:flex;gap:4px;margin-bottom:4px;">
+        <select id="tok-image" style="flex:1;background:#222;color:#eee;border:1px solid #444;border-radius:3px;padding:4px;font-size:11px;">
+          <option value="">No image (colored disc)</option>
+        </select>
+        <button onclick="refreshTokenImageOptions()" title="Reload images from your vault" style="padding:4px 6px;">↻</button>
+      </div>
+      <div style="display:flex;gap:4px;align-items:center;margin-bottom:6px;">
+        <label style="font-size:11px;color:#aaa;">Side</label>
+        <select id="tok-side" style="flex:1;background:#222;color:#eee;border:1px solid #444;border-radius:3px;padding:4px;font-size:11px;">
+          <option value="pc">Player (PC)</option>
+          <option value="npc">NPC / Enemy</option>
+        </select>
+        <button class="primary" onclick="createTokenFromForm()" style="background:#6a4;border-color:#8c6;color:#fff;">+ Add</button>
+      </div>
+
+      <!-- Add an existing roster NPC to the current map -->
+      <div id="tok-roster-row" style="display:none;gap:4px;margin-bottom:6px;">
+        <select id="tok-roster-add" style="flex:1;min-width:0;background:#222;color:#eee;border:1px solid #444;border-radius:3px;padding:4px;font-size:11px;">
+          <option value="">Add NPC from roster…</option>
+        </select>
+        <button onclick="addRosterTokenFromSelect()" title="Add this NPC to the current map">+ To map</button>
+      </div>
+
+      <!-- Token list (tokens on the current map) -->
+      <div id="token-list" style="display:flex;flex-direction:column;gap:3px;max-height:240px;overflow:auto;margin-bottom:8px;"></div>
+
+
+      <!-- Marker / laser -->
+      <div style="border-top:1px solid #333;padding-top:6px;margin-top:6px;">
+        <label>Marker (laser): <span class="val" id="marker-status">OFF</span></label>
+        <div style="display:flex;gap:4px;align-items:center;">
+          <button onclick="toggleMarkerMode()" id="btn-marker" style="flex:1;">Draw Marker</button>
+          <input type="color" id="marker-color" value="#39ff14" title="Your marker color" style="width:30px;height:28px;border:1px solid #555;background:#222;cursor:pointer;padding:0;">
+        </div>
+        <div style="font-size:11px;color:#888;margin-top:4px;">Drag on the map to draw a glowing line that everyone sees and fades after a few seconds. Players have the same tool on their view.</div>
+      </div>
+    </div>
+  </details>
+
+  <details class="sb-section">
+    <summary>Text Overlay</summary>
+    <div class="sb-body">
+      <div id="text-overlay-panel">
+        <div style="color:#aaa;font-size:11px;margin-bottom:4px;">Appears on projector overlay.</div>
+        <textarea id="text-input" placeholder="Type read-aloud text…" style="width:100%;height:80px;background:#222;color:#eee;border:1px solid #444;border-radius:4px;padding:6px;font-family:Georgia,serif;font-size:12px;resize:vertical;"></textarea>
+        <div class="row" style="margin-top:6px;width:100%;">
+          <button class="primary" onclick="showTextOnPlayer()" style="background:#6a4;border-color:#8c6;color:#fff;">Show</button>
+          <button onclick="hideTextOnPlayer()">Hide</button>
+        </div>
+      </div>
+    </div>
+  </details>
+
+</div><!-- /#sidebar-content -->
+</aside>
+
+<main id="main-content">
+
+  <div id="view-idle" class="main-view active">
+    <div class="welcome">
+      <h2>GM Display</h2>
+      <p>Click a <code>gm://map/…</code> or <code>gm://show/…</code> link in Obsidian, pick a map from the sidebar's <strong>Maps</strong> section, or drop an image into it.</p>
+      <p style="font-size:12px;color:#666;">Open the Projector and Sidecar windows from the <strong>Displays</strong> section, then drag each to the right screen.</p>
+    </div>
+  </div>
+
+  <div id="view-fog" class="main-view">
+    <div id="gm-canvas-container">
+      <div id="gm-canvas-wrap">
+        <canvas id="gm-map-canvas"></canvas>
+        <canvas id="gm-fog-canvas"></canvas>
+        <canvas id="gm-grid-canvas" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;"></canvas>
+        <canvas id="gm-marker-canvas" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;"></canvas>
+        <div id="gm-token-layer" style="position:absolute;top:0;left:0;width:100%;height:100%;"></div>
+        <div id="viewport-outline"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="view-image" class="main-view">
+    <!-- WYSIWYG sidecar mirror: shows the same cropped + rotated content the
+         sidecar window is displaying. -->
+    <div id="image-rotation-wrap-gm">
+      <div id="image-canvas-wrap-gm">
+        <canvas id="image-canvas-gm"></canvas>
+      </div>
+    </div>
+    <img id="display-image">
+  </div>
+
+  <div id="fog-presets-bar" style="display:none;">
+    <span class="preset-label">Fog</span>
+    <div id="fog-presets-list"></div>
+    <div id="fog-preset-actions">
+      <button onclick="newPreset('empty')" title="New preset starting fully hidden">+ Hidden</button>
+      <button onclick="newPreset('full')" title="New preset starting fully revealed">+ Revealed</button>
+      <button onclick="copyPreset()" title="Duplicate active preset">Copy</button>
+    </div>
+  </div>
+
+</main>
+
+</div><!-- /#app -->
+
+
+<!-- Player View (used for BOTH display types, differentiated by ?display= param) -->
+<div id="player-view">
+  <div id="player-rotation-wrap">
+    <div id="player-canvas-wrap">
+      <canvas id="player-canvas"></canvas>
+      <canvas id="player-grid-canvas"></canvas>
+      <canvas id="player-token-canvas" style="position:absolute;top:0;left:0;"></canvas>
+      <canvas id="player-marker-canvas" style="position:absolute;top:0;left:0;"></canvas>
+    </div>
+  </div>
+  <img id="player-image">
+  <div id="player-text-overlay"></div>
+</div>
+
+<!-- Remote player page (mode=remote): map + grid + tokens, no GM controls -->
+<div id="remote-view" style="display:none;">
+  <div id="remote-select">
+    <div class="remote-select-box">
+      <h2>Join the table</h2>
+      <input type="text" id="remote-name" placeholder="Your name" autocomplete="off">
+      <div class="remote-color-row">
+        <span>Your color</span>
+        <div id="remote-color-swatches"></div>
+      </div>
+      <div class="remote-pick-label">Pick your character</div>
+      <div id="remote-roster"><div class="remote-empty">Waiting for the GM…</div></div>
+    </div>
+  </div>
+  <div id="remote-stage" style="display:none;">
+    <canvas id="remote-canvas"></canvas>
+    <canvas id="remote-grid-canvas"></canvas>
+    <canvas id="remote-marker-canvas"></canvas>
+    <div id="remote-token-layer"></div>
+  </div>
+  <div id="remote-bar" style="display:none;">
+    <span id="remote-color-dot"></span>
+    <span id="remote-who"></span>
+    <span id="remote-token-info"></span>
+    <button id="remote-change-btn" onclick="remoteChangeCharacter()">Change</button>
+    <button id="remote-marker-btn" onclick="remoteToggleMarker()">Marker</button>
+  </div>
+</div>
+
+<div id="status-bar">
+  <span id="status-left">Ready</span>
+  <span id="status-right">GM Display v4.3</span>
+</div>
+
+<script src="js/state.js"></script>
+<script src="js/games.js"></script>
+<script src="js/per-map-store.js"></script>
+<script src="js/init.js"></script>
+<script src="js/fog.js"></script>
+<script src="js/sidebar.js"></script>
+<script src="js/fog-presets.js"></script>
+<script src="js/projection.js"></script>
+<script src="js/crop.js"></script>
+<script src="js/navigation.js"></script>
+<script src="js/player-view.js"></script>
+<script src="js/keyboard.js"></script>
+<script src="js/tokens.js"></script>
+</body>
+</html>

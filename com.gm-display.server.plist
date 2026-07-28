@@ -8,7 +8,7 @@
     <key>ProgramArguments</key>
     <array>
         <string>/usr/bin/python3</string>
-        <string>/Users/tim/Documents/Pathfinder/.tools/gm-display/server.py</string>
+        <string>/Users/tim/Documents/RPG/Campaign Vault/.tools/gm-display/server.py</string>
     </array>
 
     <key>RunAtLoad</key>

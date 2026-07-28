@@ -246,7 +246,7 @@ def discover_image_roots():
     if '/Contents/Resources' in script_dir:
         # Running from .app bundle — find vault via known paths
         home = os.path.expanduser('~')
-        for name in ['Documents/Pathfinder', 'Documents/Obsidian Vault']:
+        for name in ['Documents/RPG/Campaign Vault', 'Documents/Pathfinder', 'Documents/Obsidian Vault']:
             candidate = os.path.join(home, name)
             if os.path.isdir(candidate):
                 add_vault(candidate)

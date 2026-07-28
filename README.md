@@ -14,6 +14,10 @@ Designed for use with [Obsidian](https://obsidian.md) vaults via `gm://` URL pro
 - **Text Overlay** — Display read-aloud text on the projector with a parchment-style overlay.
 - **Obsidian Integration** — `gm://map/...` and `gm://show/...` links in your notes send commands directly to the running server.
 - **macOS Menu Bar App** — Optional native Swift app (with AppleScript fallback) that registers the `gm://` URL scheme and lives in your menu bar.
+- **Tokens** — Create player/NPC tokens (colored disc + name, or a vault image). Duplicate a token to auto-number it (`Goblin` → `Goblin 1`, `Goblin 2`, …). Tokens snap to a square grid and appear on the projector and on players' web view.
+- **Propose / Approve Moves** — A player drags their token to a new square; it shows as a greyed-out ghost on every screen while the original stays solid, so the table can discuss it. The GM gets ✓/✗ controls (and can nudge the ghost first); approving commits the move for everyone.
+- **Remote Players (ngrok / LAN)** — Share the map over the web. Players open a link, type a name, claim a token, and move it. They see the fog-of-war (revealed map art hidden as solid black) but can still see the grid and place/move tokens in the dark. They never see the GM controls.
+- **Neon Markers** — A shared "laser pointer": drag to draw a glowing line that everyone sees and that fades after a few seconds. Call out a target, trace a move, mark a grenade toss. GM and every player each pick their own color.
 - **Zero Dependencies** — Pure Python server, vanilla HTML/JS/CSS client. No npm, no build step.
 
 ## Quick Start
@@ -48,6 +52,30 @@ In your Obsidian notes, use these link formats:
 - `gm://show/...` sends to the **sidecar** as a simple image display
 
 Paths are relative to your vault root.
+
+## Remote Players (Tokens over the Web)
+
+Tokens, fog, the grid, and markers sync to remote players through the server, so
+players on other machines can take part — not just the local projector/sidecar
+windows (which still sync instantly via `BroadcastChannel`).
+
+1. Start the server as usual, open a map, and enter **Fog of War** mode.
+2. Add tokens from the sidebar **Tokens** panel. Give players' tokens the **Player (PC)** side.
+3. Expose the server with your ngrok tunnel:
+
+   ```bash
+   ngrok http 7680
+   ```
+
+4. Send players the ngrok URL. They land on the **player page** automatically
+   (the GM control page is only served to localhost). They type a name, tap a
+   token to claim it, and drag it to propose a move.
+5. You'll see proposed moves as greyed ghosts with ✓/✗ buttons. Approve to commit.
+
+Security model is intentionally light (no passwords, as requested): anyone with
+the link can join and control an unclaimed token. Remote visitors can only *submit*
+moves/claims/markers — they can never push authoritative state or reach the GM page.
+Works the same over a LAN if you bind to your machine's IP instead of using ngrok.
 
 ## macOS App (Optional)
 

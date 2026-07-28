@@ -1,0 +1,3895 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>GM Display</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { overflow: hidden; height: 100vh; }
+body {
+  background: #1a1a1a;
+  color: #e0e0e0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  overflow: hidden;
+  height: 100vh;
+  user-select: none;
+}
+
+/* === Sidebar + main content shell === */
+#app {
+  display: flex;
+  width: 100vw;
+  height: 100vh;
+}
+#app.player-mode { display: none; } /* hide GM shell entirely in player windows */
+
+#sidebar {
+  width: 320px;
+  flex-shrink: 0;
+  background: #1d1d1d;
+  border-right: 1px solid #333;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+#sidebar-header {
+  padding: 12px 14px;
+  border-bottom: 1px solid #333;
+  background: #222;
+}
+#sidebar-header h1 {
+  font-size: 16px;
+  font-weight: 500;
+  color: #cdd;
+  margin: 0;
+}
+#sidebar-header .pulse-row {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #6a4;
+}
+
+.sb-section {
+  border-bottom: 1px solid #2a2a2a;
+}
+.sb-section > summary {
+  padding: 10px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #aaa;
+  cursor: pointer;
+  list-style: none;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  background: #232323;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.sb-section > summary::-webkit-details-marker { display: none; }
+.sb-section > summary::after {
+  content: '▸';
+  color: #555;
+  font-size: 10px;
+  transition: transform 0.15s ease;
+}
+.sb-section[open] > summary::after { transform: rotate(90deg); }
+.sb-section > summary:hover { background: #2a2a2a; color: #ddd; }
+.sb-body {
+  padding: 10px 14px 14px;
+  font-size: 12px;
+}
+.sb-body label { color: #ccc; font-size: 11px; display: block; margin-top: 8px; }
+.sb-body input[type=range] { width: 100%; }
+.sb-body .val { color: #888; font-size: 10px; float: right; }
+.sb-body button {
+  background: #444; border: 1px solid #666; color: #eee;
+  padding: 4px 10px; border-radius: 4px; cursor: pointer;
+  font-size: 12px;
+}
+.sb-body button:hover { background: #555; }
+.sb-body button.active { background: #6a4; border-color: #8c6; color: #fff; }
+.sb-body .row { display: flex; gap: 4px; flex-wrap: wrap; }
+.sb-body .row > * { flex: 1; min-width: 0; }
+.sb-body .row.tight { gap: 2px; }
+
+#main-content {
+  flex: 1;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #111;
+}
+
+.main-view {
+  flex: 1;
+  width: 100%;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+  position: relative;
+}
+.main-view.active { display: flex; }
+
+#view-idle .welcome {
+  max-width: 560px;
+  text-align: center;
+  color: #888;
+  padding: 32px;
+}
+#view-idle .welcome h2 {
+  color: #aaa;
+  font-weight: 300;
+  font-size: 24px;
+  margin-bottom: 12px;
+}
+#view-idle .welcome p { line-height: 1.6; margin-top: 10px; font-size: 13px; }
+#view-idle .welcome code { background: #222; padding: 1px 6px; border-radius: 3px; }
+
+/* --- Mode: Image Display (GM preview) --- */
+#image-display {
+  display: none;
+  width: 100vw;
+  height: 100vh;
+  justify-content: center;
+  align-items: center;
+  background: #111;
+  position: relative;
+}
+#image-preview-wrap {
+  position: relative;
+  display: inline-block;
+  max-width: 90%;
+  max-height: 85%;
+}
+#image-display img {
+  display: block;
+  max-width: 100%;
+  max-height: 85vh;
+  object-fit: contain;
+  border: 1px solid #333;
+}
+#image-info {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  background: rgba(30,30,30,0.92);
+  border: 1px solid #555;
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-size: 13px;
+  z-index: 1000;
+  backdrop-filter: blur(6px);
+}
+#image-info .filename { color: #aaa; margin-bottom: 4px; }
+#image-info .label { color: #6a4; font-weight: 500; }
+
+/* --- Mode: Fog of War (GM View) --- */
+#fog-gm {
+  display: none;
+  width: 100vw;
+  height: 100vh;
+  position: relative;
+}
+#gm-toolbar {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  z-index: 1000;
+  background: rgba(30,30,30,0.92);
+  border: 1px solid #555;
+  border-radius: 8px;
+  padding: 10px 14px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 13px;
+  backdrop-filter: blur(6px);
+  flex-wrap: wrap;
+  max-width: calc(100vw - 20px);
+}
+#gm-toolbar label { color: #ccc; }
+#gm-toolbar input[type=range] { width: 80px; }
+#gm-toolbar button {
+  background: #444;
+  border: 1px solid #666;
+  color: #eee;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+#gm-toolbar button:hover { background: #555; }
+#gm-toolbar button.active { background: #6a4; border-color: #8c6; color: #fff; }
+#btn-sync-now { background: #c63; border-color: #e85; color: #fff; }
+#btn-sync-now:hover { background: #e74; }
+#btn-sync-now.pending { animation: pulse-sync 1.5s ease-in-out infinite; }
+@keyframes pulse-sync { 0%,100% { background: #c63; } 50% { background: #e85; } }
+#gm-toolbar .sep { width: 1px; height: 20px; background: #555; }
+#brush-preview {
+  width: 24px; height: 24px;
+  border: 2px solid #aaa;
+  border-radius: 50%;
+  display: inline-block;
+}
+.toolbar-val { color: #888; font-size: 11px; min-width: 28px; text-align: center; }
+
+#gm-canvas-container {
+  width: 100%; height: 100%;
+  overflow: auto;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+#gm-canvas-wrap { position: relative; display: inline-block; overflow: visible; }
+#gm-map-canvas, #gm-fog-canvas { position: absolute; top: 0; left: 0; }
+#gm-map-canvas { position: relative; }
+
+/* Viewport outline on GM canvas (shows what projector sees) */
+#viewport-outline, #image-viewport-outline {
+  position: absolute;
+  border: 2px dashed #6a4;
+  pointer-events: none;
+  z-index: 10;
+  display: none;
+  box-shadow: 0 0 0 9999px rgba(0,0,0,0.25);
+}
+
+/* Crop panel */
+#crop-panel { top: 60px; right: 10px; width: 280px; display: none; }
+#crop-panel label { color: #ccc; font-size: 12px; display: block; margin-top: 6px; }
+#crop-panel input[type=range] { width: 100%; }
+#crop-panel .val { color: #888; font-size: 11px; float: right; }
+#crop-panel button {
+  background: #444; border: 1px solid #666; color: #eee;
+  padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;
+  margin-top: 4px;
+}
+
+/* Keystone corner controls */
+.corner-group { display: flex; align-items: center; gap: 4px; margin: 4px 0; }
+.corner-label { color: #aaa; font-size: 11px; width: 24px; text-align: right; }
+.corner-btn {
+  background: #444; border: 1px solid #555; color: #ddd;
+  width: 26px; height: 26px; border-radius: 3px; cursor: pointer;
+  font-size: 14px; line-height: 1; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+.corner-btn:hover { background: #555; }
+.corner-btn:active { background: #6a4; }
+.corner-vals { color: #888; font-size: 10px; min-width: 50px; text-align: center; }
+/* Joystick drag pad for keystone corners */
+.corner-drag {
+  width: 44px; height: 44px; border-radius: 50%;
+  background: radial-gradient(circle, #555 40%, #333 100%);
+  border: 2px solid #666;
+  cursor: crosshair;
+  display: flex; align-items: center; justify-content: center;
+  color: #999; font-size: 18px;
+  user-select: none; touch-action: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.corner-drag:hover { border-color: #6a4; }
+.corner-drag.dragging { border-color: #8f6; box-shadow: 0 0 8px rgba(102,170,68,0.5); background: radial-gradient(circle, #484 40%, #333 100%); }
+
+/* --- Panels --- */
+.tool-panel {
+  position: fixed;
+  background: rgba(30,30,30,0.95);
+  border: 1px solid #555;
+  border-radius: 8px;
+  padding: 12px;
+  z-index: 1000;
+  backdrop-filter: blur(6px);
+}
+#text-overlay-panel { bottom: 50px; right: 10px; width: 400px; max-height: 300px; display: none; }
+#text-overlay-panel textarea {
+  width: 100%; height: 120px;
+  background: #222; color: #eee;
+  border: 1px solid #444; border-radius: 4px;
+  padding: 8px;
+  font-family: Georgia, serif; font-size: 14px;
+  resize: vertical;
+}
+#text-overlay-panel .btn-row { display: flex; gap: 8px; margin-top: 8px; }
+#text-overlay-panel button {
+  background: #444; border: 1px solid #666; color: #eee;
+  padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 13px;
+}
+#text-overlay-panel button.primary { background: #6a4; border-color: #8c6; }
+
+/* Rotation controls (inside projection panel) */
+.rotation-row { display: flex; gap: 4px; margin-top: 4px; }
+.rotation-row button {
+  flex: 1;
+  background: #444; border: 1px solid #666; color: #eee;
+  padding: 4px 6px; border-radius: 4px; cursor: pointer; font-size: 12px;
+}
+.rotation-row button:hover { background: #555; }
+.rotation-row button.active { background: #6a4; border-color: #8c6; color: #fff; }
+
+/* Keystone + Grid panel */
+#projection-panel { bottom: 50px; left: 10px; width: 300px; display: none; }
+#projection-panel label { color: #ccc; font-size: 12px; display: block; margin-top: 8px; }
+#projection-panel input[type=range] { width: 100%; }
+#projection-panel .val { color: #888; font-size: 11px; float: right; }
+#projection-panel button {
+  background: #444; border: 1px solid #666; color: #eee;
+  padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;
+  margin-top: 4px;
+}
+
+/* --- Player View (separate window) --- */
+#player-view {
+  display: none;
+  width: 100vw; height: 100vh;
+  background: #000;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  overflow: hidden;
+}
+/* Outer rotation wrap — applies rotation around center.
+   Keystone is applied separately on the inner #player-canvas-wrap. */
+#player-rotation-wrap {
+  position: relative;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  transform-origin: center center;
+}
+#player-canvas-wrap {
+  position: relative;
+  display: inline-block;
+  transform-origin: center center;
+}
+#player-canvas { background: #000; display: block; }
+#player-grid-canvas {
+  position: absolute; top: 0; left: 0;
+  pointer-events: none;
+}
+#player-text-overlay {
+  position: fixed;
+  bottom: 40px; left: 50%;
+  transform: translateX(-50%);
+  max-width: 80%;
+  background: rgba(0,0,0,0.85);
+  color: #f0e8d0;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 28px; line-height: 1.5;
+  padding: 24px 36px;
+  border: 2px solid #8b7355;
+  border-radius: 8px;
+  text-align: center;
+  display: none; z-index: 100;
+}
+#player-image {
+  max-width: 100%; max-height: 100%;
+  object-fit: contain;
+  display: none;
+}
+
+/* --- Landing --- */
+#landing {
+  display: flex; flex-direction: column;
+  justify-content: center; align-items: center;
+  height: 100vh; gap: 16px;
+}
+#landing h1 { font-size: 28px; font-weight: 300; color: #aaa; }
+#landing .subtitle { color: #666; font-size: 14px; margin-bottom: 10px; }
+.drop-zone {
+  width: 400px; height: 120px;
+  border: 2px dashed #555; border-radius: 12px;
+  display: flex; flex-direction: column;
+  justify-content: center; align-items: center;
+  cursor: pointer; transition: border-color 0.2s; gap: 8px;
+}
+.drop-zone:hover, .drop-zone.dragover { border-color: #6a4; }
+.drop-zone span { color: #888; font-size: 15px; }
+.drop-zone small { color: #555; font-size: 12px; }
+
+.btn { background:#333;border:1px solid #555;color:#ddd;padding:10px 24px;border-radius:6px;cursor:pointer;font-size:14px; }
+.btn:hover { background:#444;border-color:#888; }
+.btn-sm { padding:4px 12px;font-size:13px; }
+
+#mode-buttons { display: flex; gap: 12px; }
+
+.setup-row { display: flex; gap: 16px; align-items: stretch; }
+.setup-section {
+  background: #252525; border: 1px solid #444; border-radius: 8px;
+  padding: 16px 20px; text-align: center; min-width: 260px;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+}
+.setup-section h3 { font-size: 14px; color: #aaa; font-weight: 400; }
+.setup-section .status { font-size: 12px; }
+.status-off { color: #885; }
+.status-on { color: #6a4; }
+
+/* Thumbnail previews on landing */
+.thumb-wrap {
+  width: 220px; height: 130px;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 6px;
+  overflow: hidden;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+.thumb-wrap:hover { border-color: #6a4; }
+.thumb-wrap img {
+  max-width: 100%; max-height: 100%;
+  object-fit: contain;
+}
+.thumb-wrap .thumb-empty { color: #444; font-size: 12px; font-style: italic; }
+.thumb-wrap .thumb-label {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  background: rgba(0,0,0,0.7);
+  color: #aaa; font-size: 10px;
+  padding: 2px 6px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pulse { animation: pulse 2s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
+
+.instructions { color: #777; font-size: 13px; text-align: center; line-height: 1.6; max-width: 550px; }
+
+/* Status bar */
+#status-bar {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  background: rgba(20,20,20,0.9); color: #888;
+  font-size: 12px; padding: 4px 12px;
+  z-index: 2000; display: flex; justify-content: space-between;
+}
+
+.btn-home {
+  background: #335 !important;
+  border-color: #558 !important;
+}
+.btn-home:hover { background: #446 !important; }
+
+/* --- Fog Presets Strip --- */
+#fog-presets-bar {
+  position: fixed;
+  bottom: 28px; left: 10px; right: 10px;
+  z-index: 1000;
+  background: rgba(30,30,30,0.95);
+  border: 1px solid #555;
+  border-radius: 8px;
+  padding: 8px 12px;
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+}
+#fog-presets-bar .preset-label {
+  color: #888; font-size: 11px; white-space: nowrap; writing-mode: vertical-lr;
+  text-orientation: mixed; letter-spacing: 1px; text-transform: uppercase;
+}
+#fog-presets-list {
+  display: flex; gap: 6px; flex: 1; overflow-x: auto; padding: 2px 0;
+}
+.fog-preset-thumb {
+  position: relative;
+  width: 80px; height: 50px; min-width: 80px;
+  border: 2px solid #444;
+  border-radius: 4px;
+  cursor: pointer;
+  overflow: hidden;
+  background: #111;
+  transition: border-color 0.15s;
+}
+.fog-preset-thumb:hover { border-color: #888; }
+.fog-preset-thumb.active { border-color: #6a4; box-shadow: 0 0 6px rgba(102,170,68,0.4); }
+.fog-preset-thumb canvas {
+  width: 100%; height: 100%;
+  display: block;
+}
+.fog-preset-thumb .preset-name {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  background: rgba(0,0,0,0.75); color: #ccc; font-size: 9px;
+  padding: 1px 4px; text-align: center; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.fog-preset-thumb .preset-delete {
+  position: absolute; top: 1px; right: 2px;
+  background: none; border: none; color: #866; font-size: 12px;
+  cursor: pointer; padding: 0 2px; line-height: 1; display: none;
+}
+.fog-preset-thumb:hover .preset-delete { display: block; }
+.fog-preset-thumb .preset-delete:hover { color: #f66; }
+#fog-preset-actions {
+  display: flex; flex-direction: column; gap: 3px;
+}
+#fog-preset-actions button {
+  background: #333; border: 1px solid #555; color: #ccc;
+  padding: 2px 8px; border-radius: 3px; cursor: pointer;
+  font-size: 10px; white-space: nowrap;
+}
+#fog-preset-actions button:hover { background: #444; border-color: #888; }
+
+/* --- Map Library on Landing --- */
+#map-library {
+  width: 100%; max-width: 700px;
+}
+#map-library h3 {
+  font-size: 13px; color: #666; font-weight: 400;
+  margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px;
+}
+#map-library-list {
+  display: flex; gap: 8px; flex-wrap: wrap; justify-content: center;
+}
+.map-lib-card {
+  position: relative;
+  width: 130px; height: 90px;
+  border: 1px solid #333;
+  border-radius: 6px;
+  overflow: hidden;
+  cursor: pointer;
+  background: #1a1a1a;
+  transition: border-color 0.2s, transform 0.15s;
+}
+.map-lib-card:hover { border-color: #6a4; transform: translateY(-2px); }
+.map-lib-card.active { border-color: #6a4; }
+.map-lib-card.drag-over { border-color: #fc5; border-style: dashed; }
+.map-lib-card img {
+  width: 100%; height: 100%; object-fit: cover;
+}
+.map-lib-card .lib-label {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  background: rgba(0,0,0,0.8); color: #aaa; font-size: 10px;
+  padding: 2px 6px; text-align: center;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.map-lib-card .lib-delete {
+  position: absolute; top: 2px; right: 4px;
+  background: rgba(0,0,0,0.6); border: none; color: #866; font-size: 14px;
+  cursor: pointer; padding: 0 3px; border-radius: 3px; line-height: 1;
+  display: none;
+}
+.map-lib-card:hover .lib-delete { display: block; }
+.map-lib-card .lib-delete:hover { color: #f66; background: rgba(0,0,0,0.8); }
+
+/* === Sidebar refactor: neutralize the old fixed/floating panels === */
+/* All these used to be position:fixed overlays on top of full-screen pages.
+   In the sidebar layout they're inline children of <details> sections, so
+   we drop the absolute positioning, max-width, backgrounds, etc. */
+#gm-toolbar,
+#projection-panel,
+#text-overlay-panel,
+#crop-panel,
+#image-info {
+  position: static !important;
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  width: auto !important;
+  max-width: none !important;
+  max-height: none !important;
+  display: block !important;
+  backdrop-filter: none !important;
+  z-index: auto !important;
+  bottom: auto !important; top: auto !important; left: auto !important; right: auto !important;
+}
+#gm-toolbar {
+  display: flex !important;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+#gm-toolbar .sep {
+  width: 100%; height: 0; border: none; background: none; margin: 4px 0;
+}
+#image-info { display: flex !important; flex-direction: column; gap: 8px; }
+
+/* The fog presets bar lives at the bottom of the main content area, not
+   pinned to the viewport. */
+#fog-presets-bar {
+  position: static !important;
+  background: rgba(20,20,20,0.95) !important;
+  border-top: 1px solid #333 !important;
+  border-radius: 0 !important;
+  padding: 6px 10px !important;
+  margin: 0 !important;
+  flex-shrink: 0;
+}
+
+/* Fog/image canvas containers fill the main view */
+#gm-canvas-container {
+  width: 100%; height: 100%;
+  overflow: auto;
+}
+#image-preview-wrap {
+  max-width: 95%;
+  max-height: 95%;
+}
+#image-display img {
+  max-width: 100%;
+  max-height: 90vh;
+}
+
+/* Hide the legacy three-page wrappers — their children moved into the sidebar
+   and main-content. */
+#landing, #fog-gm, #image-display { display: contents; }
+</style>
+</head>
+<body>
+
+<div id="app">
+
+<aside id="sidebar">
+
+  <div id="sidebar-header">
+    <h1>GM Display</h1>
+    <div class="pulse-row pulse" id="poll-indicator">Listening for commands…</div>
+  </div>
+
+  <details class="sb-section" open>
+    <summary>Displays</summary>
+    <div class="sb-body">
+      <div style="display:flex;gap:8px;">
+        <div style="flex:1;min-width:0;">
+          <button class="btn" onclick="openDisplay('map')" style="width:100%;font-size:11px;padding:6px;">Open Projector</button>
+          <div class="thumb-wrap" id="map-thumb-wrap" onclick="resumeFogMode()" title="Click to open fog of war for the projected map" style="margin-top:6px;width:100%;height:80px;">
+            <span class="thumb-empty" id="map-thumb-empty">No map</span>
+            <img id="map-thumb" style="display:none">
+            <div class="thumb-label" id="map-thumb-label" style="display:none"></div>
+          </div>
+          <div class="status" id="map-status" style="text-align:center;font-size:10px;margin-top:4px;"><span class="status-off">not connected</span></div>
+        </div>
+        <div style="flex:1;min-width:0;">
+          <button class="btn" onclick="openDisplay('show')" style="width:100%;font-size:11px;padding:6px;">Open Sidecar</button>
+          <div class="thumb-wrap" id="show-thumb-wrap" onclick="resumeImageMode()" title="Click to preview the current handout" style="margin-top:6px;width:100%;height:80px;">
+            <span class="thumb-empty" id="show-thumb-empty">No image</span>
+            <img id="show-thumb" style="display:none">
+            <div class="thumb-label" id="show-thumb-label" style="display:none"></div>
+          </div>
+          <div class="status" id="show-status" style="text-align:center;font-size:10px;margin-top:4px;"><span class="status-off">not connected</span></div>
+        </div>
+      </div>
+      <div style="font-size:10px;color:#666;margin-top:8px;line-height:1.4;">
+        <code style="background:#222;padding:1px 4px;border-radius:3px;">gm://map/…</code> → Projector<br>
+        <code style="background:#222;padding:1px 4px;border-radius:3px;">gm://show/…</code> → Sidecar
+      </div>
+    </div>
+  </details>
+
+  <details class="sb-section" open>
+    <summary>Maps</summary>
+    <div class="sb-body">
+      <div class="drop-zone" id="drop-zone" style="width:100%;height:60px;font-size:11px;margin-bottom:8px;">
+        <span>Drop image here</span>
+        <small>or click to browse</small>
+      </div>
+      <input type="file" id="file-input" accept="image/*" style="display:none">
+      <div id="mode-buttons" style="display:none;flex-direction:column;gap:4px;margin-bottom:8px;">
+        <button class="btn" onclick="startImageMode()" style="font-size:11px;padding:5px;">Show on Sidecar</button>
+        <button class="btn" onclick="setFogContext('map'); startFogMode()" style="font-size:11px;padding:5px;">Fog of War on Projector</button>
+      </div>
+      <div id="map-library" style="display:none;">
+        <div style="font-size:10px;color:#666;margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">Library</div>
+        <div id="map-library-list" style="display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-start;"></div>
+      </div>
+    </div>
+  </details>
+
+  <details class="sb-section">
+    <summary>Sidecar Handout</summary>
+    <div class="sb-body">
+      <div id="image-info">
+        <div class="filename" id="img-filename" style="font-size:13px;color:#aaa;cursor:text;font-weight:500;" title="Double-click to rename">(no image)</div>
+        <div><span class="label" id="img-dest-label" style="font-size:10px;color:#6a4;">Showing on sidecar</span></div>
+        <div class="row">
+          <button onclick="resumeImageMode()" title="Show the handout preview in the main view">Preview</button>
+          <button onclick="startImageFogMode()" title="Paint fog of war over this handout">Edit Fog</button>
+        </div>
+        <div style="border-top:1px solid #333;padding-top:8px;margin-top:8px;">
+          <div style="color:#aaa;font-size:11px;margin-bottom:4px;">Sidecar Rotation <span class="val" id="rotation-val-img">0°</span></div>
+          <div class="row">
+            <button onclick="rotateShow(-90)" title="Rotate sidecar 90° counter-clockwise">↺</button>
+            <button onclick="rotateShow(90)" title="Rotate sidecar 90° clockwise">↻</button>
+            <button onclick="setShowRotation(180)">180°</button>
+            <button onclick="setShowRotation(0)">Reset</button>
+          </div>
+        </div>
+        <div style="border-top:1px solid #333;padding-top:8px;margin-top:8px;">
+          <div style="color:#aaa;font-size:11px;margin-bottom:4px;">Sidecar Background</div>
+          <input type="color" id="show-bg-color" value="#000000" oninput="setShowBg(this.value)" style="width:100%;height:24px;border:1px solid #555;background:#222;cursor:pointer;">
+          <div class="row" style="margin-top:4px;">
+            <button onclick="setShowBg('#000000')" style="background:#000;color:#888;">Black</button>
+            <button onclick="setShowBg('#ffffff')" style="background:#fff;color:#000;">White</button>
+            <button onclick="setShowBg('#222222')" style="background:#222;color:#ccc;">Dark</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </details>
+
+  <details class="sb-section">
+    <summary>Fog Tools</summary>
+    <div class="sb-body">
+      <div id="gm-toolbar">
+        <div class="row" style="width:100%;">
+          <button id="btn-reveal" class="active" onclick="setTool('reveal')">Reveal (R)</button>
+          <button id="btn-hide" onclick="setTool('hide')">Hide (H)</button>
+        </div>
+        <label style="margin-top:8px;">Brush</label>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <input type="range" id="brush-size" min="5" max="200" value="40" style="flex:1;">
+          <div id="brush-preview"></div>
+        </div>
+        <div class="row" style="margin-top:6px;width:100%;">
+          <button onclick="revealAll()">Reveal All</button>
+          <button onclick="hideAll()">Hide All</button>
+        </div>
+        <div class="row" style="margin-top:6px;width:100%;">
+          <button id="btn-fog-undo" onclick="fogUndo()" disabled title="Undo (Cmd+Z)">Undo</button>
+          <button id="btn-fog-redo" onclick="fogRedo()" disabled title="Redo (Cmd+Shift+Z)">Redo</button>
+        </div>
+        <div class="row" style="margin-top:6px;width:100%;">
+          <button id="btn-live-sync" onclick="toggleLiveSync()" class="active" title="When ON, fog and map changes push to projector immediately">Live</button>
+          <button id="btn-sync-now" onclick="syncNow()" style="display:none;" title="Push current map and fog to projector">Sync Now</button>
+        </div>
+      </div>
+    </div>
+  </details>
+
+  <details class="sb-section">
+    <summary>Crop</summary>
+    <div class="sb-body">
+      <div id="crop-panel">
+        <div class="row" style="width:100%;margin-bottom:6px;">
+          <button onclick="cropFit()" id="btn-crop-fit" style="background:#335;border:1px solid #558;color:#cdf;">Fit (1)</button>
+          <button onclick="cropFill()" id="btn-crop-fill">Fill (2)</button>
+        </div>
+        <label>Zoom <span class="val" id="crop-zoom-val">1.0x</span></label>
+        <input type="range" id="crop-zoom" min="10" max="1000" value="100" step="5" oninput="updateCrop()">
+        <label>H Position <span class="val" id="crop-hpos-val">50%</span></label>
+        <input type="range" id="crop-hpos" min="0" max="100" value="50" step="1" oninput="updateCrop()">
+        <label>V Position <span class="val" id="crop-vpos-val">50%</span></label>
+        <input type="range" id="crop-vpos" min="0" max="100" value="50" step="1" oninput="updateCrop()">
+      </div>
+    </div>
+  </details>
+
+  <details class="sb-section">
+    <summary>Projector Adjustments</summary>
+    <div class="sb-body">
+      <div id="projection-panel">
+        <div style="color:#aaa;font-size:12px;margin-bottom:4px;"><strong>4-Corner Keystone</strong></div>
+        <div style="color:#666;font-size:10px;margin-bottom:6px;">Drag pads to move corners. Arrows: 1px (Shift=10px).</div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          <div>
+            <div style="color:#6a4;font-size:11px;margin-bottom:2px;">Top-Left</div>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <div class="corner-drag" data-corner="tl" title="Drag to move corner">+</div>
+              <div>
+                <div class="corner-group">
+                  <button class="corner-btn" onclick="nudgeCorner('tl','x',-1)">◀</button>
+                  <button class="corner-btn" onclick="nudgeCorner('tl','y',-1)">▲</button>
+                  <button class="corner-btn" onclick="nudgeCorner('tl','y',1)">▼</button>
+                  <button class="corner-btn" onclick="nudgeCorner('tl','x',1)">▶</button>
+                </div>
+                <div style="display:flex;align-items:center;gap:4px;">
+                  <div class="corner-vals" id="corner-tl-val">0,0</div>
+                  <button class="corner-btn" onclick="resetCorner('tl')" title="Reset to 0,0" style="font-size:11px;">⟲</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div style="color:#6a4;font-size:11px;margin-bottom:2px;">Top-Right</div>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <div class="corner-drag" data-corner="tr" title="Drag to move corner">+</div>
+              <div>
+                <div class="corner-group">
+                  <button class="corner-btn" onclick="nudgeCorner('tr','x',-1)">◀</button>
+                  <button class="corner-btn" onclick="nudgeCorner('tr','y',-1)">▲</button>
+                  <button class="corner-btn" onclick="nudgeCorner('tr','y',1)">▼</button>
+                  <button class="corner-btn" onclick="nudgeCorner('tr','x',1)">▶</button>
+                </div>
+                <div style="display:flex;align-items:center;gap:4px;">
+                  <div class="corner-vals" id="corner-tr-val">0,0</div>
+                  <button class="corner-btn" onclick="resetCorner('tr')" title="Reset to 0,0" style="font-size:11px;">⟲</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div style="color:#6a4;font-size:11px;margin-bottom:2px;">Bottom-Left</div>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <div class="corner-drag" data-corner="bl" title="Drag to move corner">+</div>
+              <div>
+                <div class="corner-group">
+                  <button class="corner-btn" onclick="nudgeCorner('bl','x',-1)">◀</button>
+                  <button class="corner-btn" onclick="nudgeCorner('bl','y',-1)">▲</button>
+                  <button class="corner-btn" onclick="nudgeCorner('bl','y',1)">▼</button>
+                  <button class="corner-btn" onclick="nudgeCorner('bl','x',1)">▶</button>
+                </div>
+                <div style="display:flex;align-items:center;gap:4px;">
+                  <div class="corner-vals" id="corner-bl-val">0,0</div>
+                  <button class="corner-btn" onclick="resetCorner('bl')" title="Reset to 0,0" style="font-size:11px;">⟲</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div style="color:#6a4;font-size:11px;margin-bottom:2px;">Bottom-Right</div>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <div class="corner-drag" data-corner="br" title="Drag to move corner">+</div>
+              <div>
+                <div class="corner-group">
+                  <button class="corner-btn" onclick="nudgeCorner('br','x',-1)">◀</button>
+                  <button class="corner-btn" onclick="nudgeCorner('br','y',-1)">▲</button>
+                  <button class="corner-btn" onclick="nudgeCorner('br','y',1)">▼</button>
+                  <button class="corner-btn" onclick="nudgeCorner('br','x',1)">▶</button>
+                </div>
+                <div style="display:flex;align-items:center;gap:4px;">
+                  <div class="corner-vals" id="corner-br-val">0,0</div>
+                  <button class="corner-btn" onclick="resetCorner('br')" title="Reset to 0,0" style="font-size:11px;">⟲</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top:8px;">
+          <button onclick="toggleTestPattern()" id="btn-test-pattern" style="width:100%;padding:6px;font-size:12px;">Test Pattern (white + grid)</button>
+        </div>
+
+        <div style="border-top:1px solid #444;margin-top:10px;padding-top:10px;">
+          <div style="color:#aaa;font-size:12px;margin-bottom:4px;"><strong>Projector Rotation</strong> <span class="val" id="rotation-val">0°</span></div>
+          <div class="rotation-row">
+            <button onclick="rotateMap(-90)" title="Rotate projector 90° counter-clockwise">↺ 90°</button>
+            <button onclick="rotateMap(90)" title="Rotate projector 90° clockwise">↻ 90°</button>
+            <button onclick="setMapRotation(180)" title="Flip projector 180°">180°</button>
+            <button onclick="setMapRotation(0)" title="Reset projector rotation">Reset</button>
+          </div>
+          <input type="range" id="rotation-slider" min="0" max="359" value="0" step="1"
+                 oninput="setMapRotation(this.value)" style="width:100%;margin-top:6px;">
+        </div>
+
+        <label>Scale <span class="val" id="scale-val">100%</span></label>
+        <input type="range" id="scale-slider" min="50" max="200" value="100" step="1"
+               oninput="updateScale(this.value)">
+
+        <div style="border-top:1px solid #444;margin-top:10px;padding-top:10px;">
+          <div style="color:#aaa;font-size:12px;margin-bottom:4px;"><strong>Grid Overlay</strong></div>
+          <label>Grid: <span class="val" id="grid-status">OFF</span></label>
+          <button onclick="toggleGrid()" id="btn-grid" style="margin-bottom:6px;">Toggle Grid (G)</button>
+          <label>Grid spacing (px) <span class="val" id="grid-px-val">50</span></label>
+          <input type="range" id="grid-px-slider" min="10" max="200" value="50" step="1"
+                 oninput="updateGridSize(this.value)">
+          <label>Grid opacity <span class="val" id="grid-opacity-val">40%</span></label>
+          <input type="range" id="grid-opacity-slider" min="5" max="100" value="40" step="5"
+                 oninput="updateGridOpacity(this.value)">
+          <label>Grid color</label>
+          <div style="display:flex;gap:4px;margin-top:4px;">
+            <button onclick="setGridColor('rgba(255,255,255,__A__)')" style="background:#ccc;color:#000;padding:2px 8px;">White</button>
+            <button onclick="setGridColor('rgba(0,0,0,__A__)')" style="background:#222;padding:2px 8px;">Black</button>
+            <button onclick="setGridColor('rgba(0,150,255,__A__)')" style="background:#09f;padding:2px 8px;">Blue</button>
+            <button onclick="setGridColor('rgba(255,50,50,__A__)')" style="background:#f33;padding:2px 8px;">Red</button>
+          </div>
+        </div>
+
+        <div style="border-top:1px solid #444;margin-top:10px;padding-top:10px;">
+          <div style="color:#aaa;font-size:12px;margin-bottom:4px;"><strong>Projector Background</strong></div>
+          <input type="color" id="map-bg-color" value="#000000" oninput="setMapBg(this.value)" style="width:100%;height:30px;border:1px solid #555;background:#222;cursor:pointer;">
+          <div style="display:flex;gap:4px;margin-top:6px;">
+            <button onclick="setMapBg('#000000')" style="flex:1;background:#000;color:#888;border:1px solid #555;">Black</button>
+            <button onclick="setMapBg('#ffffff')" style="flex:1;background:#fff;color:#000;border:1px solid #888;">White</button>
+            <button onclick="setMapBg('#222222')" style="flex:1;background:#222;color:#ccc;border:1px solid #555;">Dark</button>
+            <button onclick="setMapBg('#888888')" style="flex:1;background:#888;color:#000;border:1px solid #aaa;">Gray</button>
+          </div>
+        </div>
+
+        <div style="margin-top:8px;">
+          <button onclick="resetProjection()" style="width:100%;">Reset All</button>
+        </div>
+      </div>
+    </div>
+  </details>
+
+  <details class="sb-section">
+    <summary>Text Overlay</summary>
+    <div class="sb-body">
+      <div id="text-overlay-panel">
+        <div style="color:#aaa;font-size:11px;margin-bottom:4px;">Appears on projector overlay.</div>
+        <textarea id="text-input" placeholder="Type read-aloud text…" style="width:100%;height:80px;background:#222;color:#eee;border:1px solid #444;border-radius:4px;padding:6px;font-family:Georgia,serif;font-size:12px;resize:vertical;"></textarea>
+        <div class="row" style="margin-top:6px;width:100%;">
+          <button class="primary" onclick="showTextOnPlayer()" style="background:#6a4;border-color:#8c6;color:#fff;">Show</button>
+          <button onclick="hideTextOnPlayer()">Hide</button>
+        </div>
+      </div>
+    </div>
+  </details>
+
+</aside>
+
+<main id="main-content">
+
+  <div id="view-idle" class="main-view active">
+    <div class="welcome">
+      <h2>GM Display</h2>
+      <p>Click a <code>gm://map/…</code> or <code>gm://show/…</code> link in Obsidian, pick a map from the sidebar's <strong>Maps</strong> section, or drop an image into it.</p>
+      <p style="font-size:12px;color:#666;">Open the Projector and Sidecar windows from the <strong>Displays</strong> section, then drag each to the right screen.</p>
+    </div>
+  </div>
+
+  <div id="view-fog" class="main-view">
+    <div id="gm-canvas-container">
+      <div id="gm-canvas-wrap">
+        <canvas id="gm-map-canvas"></canvas>
+        <canvas id="gm-fog-canvas"></canvas>
+        <div id="viewport-outline"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="view-image" class="main-view">
+    <div id="image-preview-wrap">
+      <img id="display-image">
+      <div id="image-viewport-outline"></div>
+    </div>
+  </div>
+
+  <div id="fog-presets-bar" style="display:none;">
+    <span class="preset-label">Fog</span>
+    <div id="fog-presets-list"></div>
+    <div id="fog-preset-actions">
+      <button onclick="newPreset('empty')" title="New preset starting fully hidden">+ Hidden</button>
+      <button onclick="newPreset('full')" title="New preset starting fully revealed">+ Revealed</button>
+      <button onclick="copyPreset()" title="Duplicate active preset">Copy</button>
+    </div>
+  </div>
+
+</main>
+
+</div><!-- /#app -->
+
+<!-- Legacy three-page wrappers — kept as no-op containers for any stray JS references -->
+<div id="image-display">
+  <div id="image-info">
+    <div class="filename" id="img-filename"></div>
+    <div><span class="label" id="img-dest-label">Showing on sidecar</span></div>
+    <div style="margin-top:8px">
+      <button class="btn btn-sm btn-home" onclick="goHome()">Home</button>
+      <button class="btn btn-sm" onclick="goBack()">Back (Esc)</button>
+      <button class="btn btn-sm" onclick="toggleCropPanel()" id="btn-crop-img">Crop (C)</button>
+      <button class="btn btn-sm" onclick="startImageFogMode()" title="Paint fog of war over this handout">Edit Fog</button>
+    </div>
+    <div style="margin-top:8px;border-top:1px solid #333;padding-top:8px;">
+      <div style="color:#aaa;font-size:11px;margin-bottom:4px;">
+        Sidecar Rotation <span class="val" id="rotation-val-img">0°</span>
+      </div>
+      <div style="display:flex;gap:4px;">
+        <button class="btn btn-sm" onclick="rotateShow(-90)" title="Rotate sidecar 90° counter-clockwise">↺ 90°</button>
+        <button class="btn btn-sm" onclick="rotateShow(90)" title="Rotate sidecar 90° clockwise">↻ 90°</button>
+        <button class="btn btn-sm" onclick="setShowRotation(180)" title="Flip sidecar 180°">180°</button>
+        <button class="btn btn-sm" onclick="setShowRotation(0)" title="Reset sidecar rotation">0°</button>
+      </div>
+    </div>
+    <div style="margin-top:8px;border-top:1px solid #333;padding-top:8px;">
+      <div style="color:#aaa;font-size:11px;margin-bottom:4px;">Sidecar Background</div>
+      <input type="color" id="show-bg-color" value="#000000" oninput="setShowBg(this.value)" style="width:100%;height:24px;border:1px solid #555;background:#222;cursor:pointer;">
+      <div style="display:flex;gap:4px;margin-top:4px;">
+        <button class="btn btn-sm" onclick="setShowBg('#000000')" style="flex:1;background:#000;color:#888;">Black</button>
+        <button class="btn btn-sm" onclick="setShowBg('#ffffff')" style="flex:1;background:#fff;color:#000;">White</button>
+        <button class="btn btn-sm" onclick="setShowBg('#222222')" style="flex:1;background:#222;color:#ccc;">Dark</button>
+      </div>
+    </div>
+  </div>
+  <div id="image-preview-wrap">
+    <img id="display-image">
+    <div id="image-viewport-outline"></div>
+  </div>
+</div>
+
+<!-- Fog of War: GM View -->
+<div id="fog-gm">
+  <div id="gm-toolbar">
+    <button class="btn-home" onclick="goHome()" style="background:#335;border:1px solid #558;color:#cdf;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px;" title="Return to landing page (fog state preserved)">Home</button>
+    <div class="sep"></div>
+    <button id="btn-reveal" class="active" onclick="setTool('reveal')">Reveal (R)</button>
+    <button id="btn-hide" onclick="setTool('hide')">Hide (H)</button>
+    <div class="sep"></div>
+    <label>Brush</label>
+    <input type="range" id="brush-size" min="5" max="200" value="40">
+    <div id="brush-preview"></div>
+    <div class="sep"></div>
+    <button onclick="revealAll()">Reveal All</button>
+    <button onclick="hideAll()">Hide All</button>
+    <div class="sep"></div>
+    <button id="btn-fog-undo" onclick="fogUndo()" disabled title="Undo (Cmd+Z)">Undo</button>
+    <button id="btn-fog-redo" onclick="fogRedo()" disabled title="Redo (Cmd+Shift+Z)">Redo</button>
+    <div class="sep"></div>
+    <button onclick="toggleTextPanel()">Text (T)</button>
+    <button onclick="toggleProjectionPanel()" id="btn-projection">Projection (P)</button>
+    <div class="sep"></div>
+    <button onclick="toggleCropPanel()" id="btn-crop">Crop (C)</button>
+    <div class="sep"></div>
+    <button id="btn-live-sync" onclick="toggleLiveSync()" class="active" title="When ON, fog and map changes push to projector immediately">Live</button>
+    <button id="btn-sync-now" onclick="syncNow()" style="display:none;" title="Push current map and fog to projector">Sync Now</button>
+  </div>
+
+  <!-- Text overlay panel -->
+  <div id="text-overlay-panel" class="tool-panel">
+    <div style="color:#aaa;font-size:12px;margin-bottom:6px;">Text appears on projector overlay</div>
+    <textarea id="text-input" placeholder="Type read-aloud text here..."></textarea>
+    <div class="btn-row">
+      <button class="primary" onclick="showTextOnPlayer()">Show on Projector</button>
+      <button onclick="hideTextOnPlayer()">Hide Text</button>
+    </div>
+  </div>
+
+  <!-- Projection panel: 4-corner keystone + grid -->
+  <div id="projection-panel" class="tool-panel">
+    <div style="color:#aaa;font-size:12px;margin-bottom:4px;"><strong>4-Corner Keystone</strong></div>
+    <div style="color:#666;font-size:10px;margin-bottom:6px;">Drag pads to move corners. Arrows: 1px (Shift=10px).</div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+      <div>
+        <div style="color:#6a4;font-size:11px;margin-bottom:2px;">Top-Left</div>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <div class="corner-drag" data-corner="tl" title="Drag to move corner">+</div>
+          <div>
+            <div class="corner-group">
+              <button class="corner-btn" onclick="nudgeCorner('tl','x',-1)">◀</button>
+              <button class="corner-btn" onclick="nudgeCorner('tl','y',-1)">▲</button>
+              <button class="corner-btn" onclick="nudgeCorner('tl','y',1)">▼</button>
+              <button class="corner-btn" onclick="nudgeCorner('tl','x',1)">▶</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:4px;">
+              <div class="corner-vals" id="corner-tl-val">0,0</div>
+              <button class="corner-btn" onclick="resetCorner('tl')" title="Reset to 0,0" style="font-size:11px;">⟲</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div style="color:#6a4;font-size:11px;margin-bottom:2px;">Top-Right</div>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <div class="corner-drag" data-corner="tr" title="Drag to move corner">+</div>
+          <div>
+            <div class="corner-group">
+              <button class="corner-btn" onclick="nudgeCorner('tr','x',-1)">◀</button>
+              <button class="corner-btn" onclick="nudgeCorner('tr','y',-1)">▲</button>
+              <button class="corner-btn" onclick="nudgeCorner('tr','y',1)">▼</button>
+              <button class="corner-btn" onclick="nudgeCorner('tr','x',1)">▶</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:4px;">
+              <div class="corner-vals" id="corner-tr-val">0,0</div>
+              <button class="corner-btn" onclick="resetCorner('tr')" title="Reset to 0,0" style="font-size:11px;">⟲</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div style="color:#6a4;font-size:11px;margin-bottom:2px;">Bottom-Left</div>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <div class="corner-drag" data-corner="bl" title="Drag to move corner">+</div>
+          <div>
+            <div class="corner-group">
+              <button class="corner-btn" onclick="nudgeCorner('bl','x',-1)">◀</button>
+              <button class="corner-btn" onclick="nudgeCorner('bl','y',-1)">▲</button>
+              <button class="corner-btn" onclick="nudgeCorner('bl','y',1)">▼</button>
+              <button class="corner-btn" onclick="nudgeCorner('bl','x',1)">▶</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:4px;">
+              <div class="corner-vals" id="corner-bl-val">0,0</div>
+              <button class="corner-btn" onclick="resetCorner('bl')" title="Reset to 0,0" style="font-size:11px;">⟲</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div style="color:#6a4;font-size:11px;margin-bottom:2px;">Bottom-Right</div>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <div class="corner-drag" data-corner="br" title="Drag to move corner">+</div>
+          <div>
+            <div class="corner-group">
+              <button class="corner-btn" onclick="nudgeCorner('br','x',-1)">◀</button>
+              <button class="corner-btn" onclick="nudgeCorner('br','y',-1)">▲</button>
+              <button class="corner-btn" onclick="nudgeCorner('br','y',1)">▼</button>
+              <button class="corner-btn" onclick="nudgeCorner('br','x',1)">▶</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:4px;">
+              <div class="corner-vals" id="corner-br-val">0,0</div>
+              <button class="corner-btn" onclick="resetCorner('br')" title="Reset to 0,0" style="font-size:11px;">⟲</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top:8px;">
+      <button onclick="toggleTestPattern()" id="btn-test-pattern" style="width:100%;padding:6px;font-size:12px;">Test Pattern (white + grid)</button>
+    </div>
+
+    <div style="border-top:1px solid #444;margin-top:10px;padding-top:10px;">
+      <div style="color:#aaa;font-size:12px;margin-bottom:4px;"><strong>Projector Rotation</strong> <span class="val" id="rotation-val">0°</span></div>
+      <div class="rotation-row">
+        <button onclick="rotateMap(-90)" title="Rotate projector 90° counter-clockwise">↺ 90°</button>
+        <button onclick="rotateMap(90)" title="Rotate projector 90° clockwise">↻ 90°</button>
+        <button onclick="setMapRotation(180)" title="Flip projector 180°">180°</button>
+        <button onclick="setMapRotation(0)" title="Reset projector rotation">Reset</button>
+      </div>
+      <input type="range" id="rotation-slider" min="0" max="359" value="0" step="1"
+             oninput="setMapRotation(this.value)" style="width:100%;margin-top:6px;">
+    </div>
+
+    <label>Scale <span class="val" id="scale-val">100%</span></label>
+    <input type="range" id="scale-slider" min="50" max="200" value="100" step="1"
+           oninput="updateScale(this.value)">
+
+    <div style="border-top:1px solid #444;margin-top:10px;padding-top:10px;">
+      <div style="color:#aaa;font-size:12px;margin-bottom:4px;"><strong>Grid Overlay</strong></div>
+
+      <label>Grid: <span class="val" id="grid-status">OFF</span></label>
+      <button onclick="toggleGrid()" id="btn-grid" style="margin-bottom:6px;">Toggle Grid (G)</button>
+
+      <label>Grid spacing (px) <span class="val" id="grid-px-val">50</span></label>
+      <input type="range" id="grid-px-slider" min="10" max="200" value="50" step="1"
+             oninput="updateGridSize(this.value)">
+
+      <label>Grid opacity <span class="val" id="grid-opacity-val">40%</span></label>
+      <input type="range" id="grid-opacity-slider" min="5" max="100" value="40" step="5"
+             oninput="updateGridOpacity(this.value)">
+
+      <label>Grid color</label>
+      <div style="display:flex;gap:4px;margin-top:4px;">
+        <button onclick="setGridColor('rgba(255,255,255,__A__)')" style="background:#ccc;color:#000;padding:2px 8px;">White</button>
+        <button onclick="setGridColor('rgba(0,0,0,__A__)')" style="background:#222;padding:2px 8px;">Black</button>
+        <button onclick="setGridColor('rgba(0,150,255,__A__)')" style="background:#09f;padding:2px 8px;">Blue</button>
+        <button onclick="setGridColor('rgba(255,50,50,__A__)')" style="background:#f33;padding:2px 8px;">Red</button>
+      </div>
+    </div>
+
+    <div style="border-top:1px solid #444;margin-top:10px;padding-top:10px;">
+      <div style="color:#aaa;font-size:12px;margin-bottom:4px;"><strong>Projector Background</strong></div>
+      <input type="color" id="map-bg-color" value="#000000" oninput="setMapBg(this.value)" style="width:100%;height:30px;border:1px solid #555;background:#222;cursor:pointer;">
+      <div style="display:flex;gap:4px;margin-top:6px;">
+        <button onclick="setMapBg('#000000')" style="flex:1;background:#000;color:#888;border:1px solid #555;">Black</button>
+        <button onclick="setMapBg('#ffffff')" style="flex:1;background:#fff;color:#000;border:1px solid #888;">White</button>
+        <button onclick="setMapBg('#222222')" style="flex:1;background:#222;color:#ccc;border:1px solid #555;">Dark</button>
+        <button onclick="setMapBg('#888888')" style="flex:1;background:#888;color:#000;border:1px solid #aaa;">Gray</button>
+      </div>
+    </div>
+
+    <div style="margin-top:8px;">
+      <button onclick="resetProjection()">Reset All</button>
+    </div>
+  </div>
+
+  <div id="gm-canvas-container">
+    <div id="gm-canvas-wrap">
+      <canvas id="gm-map-canvas"></canvas>
+      <canvas id="gm-fog-canvas"></canvas>
+      <div id="viewport-outline"></div>
+    </div>
+  </div>
+
+  <div id="fog-presets-bar">
+    <span class="preset-label">Fog</span>
+    <div id="fog-presets-list"></div>
+    <div id="fog-preset-actions">
+      <button onclick="newPreset('empty')" title="New preset starting fully hidden">+ Hidden</button>
+      <button onclick="newPreset('full')" title="New preset starting fully revealed">+ Revealed</button>
+      <button onclick="copyPreset()" title="Duplicate active preset">Copy</button>
+    </div>
+  </div>
+</div>
+
+<!-- Crop panel (top-level, works in both fog and image modes) -->
+<div id="crop-panel" class="tool-panel">
+  <div style="color:#aaa;font-size:12px;margin-bottom:4px;"><strong>Projector Crop</strong></div>
+  <div style="display:flex;gap:4px;margin-bottom:8px;">
+    <button onclick="cropFit()" id="btn-crop-fit" style="flex:1;background:#335;border:1px solid #558;color:#cdf;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:12px;">Fit (1)</button>
+    <button onclick="cropFill()" id="btn-crop-fill" style="flex:1;background:#444;border:1px solid #666;color:#eee;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:12px;">Fill (2)</button>
+  </div>
+  <label>Zoom <span class="val" id="crop-zoom-val">1.0x</span></label>
+  <input type="range" id="crop-zoom" min="10" max="1000" value="100" step="5" oninput="updateCrop()">
+  <label>H Position <span class="val" id="crop-hpos-val">50%</span></label>
+  <input type="range" id="crop-hpos" min="0" max="100" value="50" step="1" oninput="updateCrop()">
+  <label>V Position <span class="val" id="crop-vpos-val">50%</span></label>
+  <input type="range" id="crop-vpos" min="0" max="100" value="50" step="1" oninput="updateCrop()">
+</div>
+
+<!-- Player View (used for BOTH display types, differentiated by ?display= param) -->
+<div id="player-view">
+  <div id="player-rotation-wrap">
+    <div id="player-canvas-wrap">
+      <canvas id="player-canvas"></canvas>
+      <canvas id="player-grid-canvas"></canvas>
+    </div>
+  </div>
+  <img id="player-image">
+  <div id="player-text-overlay"></div>
+</div>
+
+<div id="status-bar">
+  <span id="status-left">Ready</span>
+  <span id="status-right">GM Display v4.2</span>
+</div>
+
+<script>
+// === State ===
+let loadedImage = null;
+let fogMask = null;
+let fogImage = null;
+let mapWidth = 0, mapHeight = 0;
+let currentTool = 'reveal';
+let brushSize = 40;
+let painting = false;
+let currentMode = 'landing';
+let pollTimer = null;
+
+// Live sync: when false, fog/map changes are staged but not pushed to projector
+let liveSync = true;
+let hasPendingSync = false; // true when GM state differs from what projector shows
+
+// Fog undo/redo history (per current map, in-memory)
+const FOG_HISTORY_MAX = 10;
+let fogHistory = [];    // array of Uint8Array snapshots, oldest first
+let fogHistoryIdx = -1; // points to current state in fogHistory
+let fogInitialized = false;
+
+// Fog presets: multiple fog masks per map
+// Each preset: { name: string, rle: number[] (RLE-encoded), w: number, h: number }
+let fogPresets = [];       // array of preset objects for current map
+let activePresetIdx = 0;   // index into fogPresets
+
+// Fog context: which display the current fog state targets.
+// 'map' = projector (fog on the map), 'show' = sidecar (fog on a handout).
+// Only one context is "active in the globals" (fogMask, fogImage, fogPresets, etc.)
+// at a time. The inactive context's state is held in a stash and swapped in
+// when the user switches contexts.
+let fogContext = 'map';
+let stashedMapFog = null;
+let stashedShowFog = null;
+// Source of the image fogMask/fogPresets currently match. Used to detect
+// "user switched to a different map" since callers pre-set lastMapSrc/fogImage
+// before startFogMode runs, making the obvious in-function comparisons useless.
+let lastInitializedFogSrc = null;
+
+// Map library: persisted list of all loaded maps
+// Each entry: { src: string, name: string }
+const MAP_LIBRARY_KEY = 'gm-display-map-library';
+let mapLibrary = [];  // loaded from localStorage
+
+// Track what's currently on each display (for thumbnails)
+let lastMapSrc = null;
+let lastMapName = null;
+let lastShowSrc = null;
+let lastShowName = null;
+
+// Projection settings (sent to player)
+// 4-corner keystone: pixel offsets for each corner {x, y}
+let corners = { tl: {x:0,y:0}, tr: {x:0,y:0}, bl: {x:0,y:0}, br: {x:0,y:0} };
+let projScale = 100;     // scale percent
+// Per-display rotation (0-359°). The two displays rotate independently.
+let mapRotation = 0;     // rotation applied to projector output
+let showRotation = 0;    // rotation applied to sidecar output
+// Per-display background color (around any letterboxing or smaller-than-screen content).
+let mapBg = '#000000';
+let showBg = '#000000';
+let gridEnabled = false;
+let gridPx = 50;         // grid spacing in pixels
+let gridOpacity = 0.4;
+let gridColorTemplate = 'rgba(255,255,255,__A__)'; // __A__ replaced with opacity
+
+// Two separate channels: one per display
+let mapChannel = null;
+let showChannel = null;
+
+// Player view state (when this window IS a display)
+let isPlayerView = false;
+let playerDisplay = null;
+let playerChannel = null;
+
+// Crop state (what portion of the map the projector shows)
+let cropZoom = 1;     // 1 = full map, 2 = half size shown, etc.
+let cropHPos = 0.5;   // 0-1, center of crop horizontally
+let cropVPos = 0.5;   // 0-1, center of crop vertically
+let viewportCrop = null;  // computed {x,y,w,h} in map pixels, or null
+let projectorW = 1920;  // projector screen dimensions (updated by heartbeat)
+let projectorH = 1080;
+let sidecarW = 1920;    // sidecar screen dimensions (updated by heartbeat)
+let sidecarH = 1080;
+
+// Player-side: offscreen buffer for flicker-free rendering
+let offscreenCanvas = null;
+let offscreenCtx = null;
+let cachedMapImage = null;   // pre-loaded map image on player side
+let cachedMapSrc = null;
+
+// Player-side: projection state
+let pCorners = { tl: {x:0,y:0}, tr: {x:0,y:0}, bl: {x:0,y:0}, br: {x:0,y:0} };
+let pScale = 100;
+let pRotation = 0;
+let pBg = '#000000';
+let pGridEnabled = false;
+let pGridPx = 50;
+let pGridOpacity = 0.4;
+let pGridColor = 'rgba(255,255,255,0.4)';
+// Player-side: cached fog data for crop-only updates
+let cachedFogData = null;
+// Player-side: test pattern state
+let pTestPattern = false;
+
+// === State Persistence (localStorage) ===
+const STORAGE_KEY = 'gm-display-state';
+
+// Run-length encode a Uint8Array for compact storage.
+// Fog masks are mostly 0s or 255s, so RLE compresses extremely well.
+// Format: array of [value, count] pairs.
+function rlEncode(arr) {
+  if (!arr || arr.length === 0) return [];
+  const runs = [];
+  let val = arr[0], count = 1;
+  for (let i = 1; i < arr.length; i++) {
+    if (arr[i] === val && count < 65535) {
+      count++;
+    } else {
+      runs.push(val, count);
+      val = arr[i]; count = 1;
+    }
+  }
+  runs.push(val, count);
+  return runs;
+}
+
+function rlDecode(runs, len) {
+  const arr = new Uint8Array(len);
+  let pos = 0;
+  for (let i = 0; i < runs.length; i += 2) {
+    const val = runs[i], count = runs[i + 1];
+    arr.fill(val, pos, pos + count);
+    pos += count;
+  }
+  return arr;
+}
+
+function saveState() {
+  if (isPlayerView) return;
+  try {
+    // Skip data URIs for image sources (too large for localStorage).
+    // Only persist server-relative paths (start with /).
+    const mapSrc = (lastMapSrc && !lastMapSrc.startsWith('data:')) ? lastMapSrc : null;
+    const showSrc = (lastShowSrc && !lastShowSrc.startsWith('data:')) ? lastShowSrc : null;
+
+    const state = {
+      // Projection
+      corners: corners,
+      projScale: projScale,
+      mapRotation: mapRotation,
+      showRotation: showRotation,
+      mapBg: mapBg,
+      showBg: showBg,
+      gridEnabled: gridEnabled,
+      gridPx: gridPx,
+      gridOpacity: gridOpacity,
+      gridColorTemplate: gridColorTemplate,
+      // Crop
+      cropZoom: cropZoom,
+      cropHPos: cropHPos,
+      cropVPos: cropVPos,
+      // Images (server-relative paths only)
+      lastMapSrc: mapSrc,
+      lastMapName: lastMapName,
+      lastShowSrc: showSrc,
+      lastShowName: lastShowName,
+      // Fog (RLE-compressed) — only the active context's mask is in main state.
+      // Per-image storage is the source of truth; this is just a fast path for the
+      // initial restore.
+      fogContext: fogContext,
+      fogRLE: (fogMask && (fogContext === 'show' ? showSrc : mapSrc)) ? rlEncode(fogMask) : null,
+      mapWidth: mapWidth,
+      mapHeight: mapHeight,
+      fogInitialized: fogInitialized && (fogContext === 'show' ? !!showSrc : !!mapSrc),
+      // Mode & tool
+      currentMode: currentMode,
+      currentTool: currentTool,
+      brushSize: brushSize,
+      // Test pattern
+      testPatternActive: testPatternActive,
+      liveSync: liveSync,
+      // Fog presets
+      activePresetIdx: activePresetIdx,
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    // Save per-image fog under the active context's storage key.
+    if (fogMask) {
+      const activeSrc = fogContext === 'show' ? showSrc : mapSrc;
+      if (activeSrc) savePerMapFog(activeSrc);
+    }
+  } catch (e) {
+    console.warn('[GM Display] Failed to save state:', e);
+  }
+}
+
+function restoreState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const s = JSON.parse(raw);
+
+    // Projection
+    if (s.corners) {
+      corners = s.corners;
+      ['tl','tr','bl','br'].forEach(c =>
+        document.getElementById('corner-' + c + '-val').textContent = corners[c].x + ',' + corners[c].y);
+    }
+    if (s.projScale != null) {
+      projScale = s.projScale;
+      document.getElementById('scale-slider').value = projScale;
+      document.getElementById('scale-val').textContent = projScale + '%';
+    }
+    // Backward-compat: legacy `rotation` was a single global value
+    if (s.mapRotation != null) {
+      mapRotation = ((s.mapRotation % 360) + 360) % 360;
+    } else if (s.rotation != null) {
+      mapRotation = ((s.rotation % 360) + 360) % 360;
+    }
+    if (s.showRotation != null) {
+      showRotation = ((s.showRotation % 360) + 360) % 360;
+    } else if (s.rotation != null) {
+      showRotation = ((s.rotation % 360) + 360) % 360;
+    }
+    if (typeof s.mapBg === 'string') mapBg = s.mapBg;
+    if (typeof s.showBg === 'string') showBg = s.showBg;
+    updateRotationUI();
+    updateBgUI();
+    if (s.gridEnabled != null) {
+      gridEnabled = s.gridEnabled;
+      document.getElementById('grid-status').textContent = gridEnabled ? 'ON' : 'OFF';
+      document.getElementById('btn-grid').classList.toggle('active', gridEnabled);
+    }
+    if (s.gridPx != null) {
+      gridPx = s.gridPx;
+      document.getElementById('grid-px-slider').value = gridPx;
+      document.getElementById('grid-px-val').textContent = gridPx + 'px';
+    }
+    if (s.gridOpacity != null) {
+      gridOpacity = s.gridOpacity;
+      document.getElementById('grid-opacity-slider').value = Math.round(gridOpacity * 100);
+      document.getElementById('grid-opacity-val').textContent = Math.round(gridOpacity * 100) + '%';
+    }
+    if (s.gridColorTemplate) gridColorTemplate = s.gridColorTemplate;
+
+    // Crop
+    if (s.cropZoom != null) cropZoom = s.cropZoom;
+    if (s.cropHPos != null) cropHPos = s.cropHPos;
+    if (s.cropVPos != null) cropVPos = s.cropVPos;
+    applyCropToSliders();
+
+    // Tool & brush
+    if (s.currentTool) setTool(s.currentTool);
+    if (s.brushSize != null) {
+      brushSize = s.brushSize;
+      const bel = document.getElementById('brush-size');
+      if (bel) bel.value = brushSize;
+      updateBrushPreview();
+    }
+    if (s.liveSync != null && !s.liveSync) {
+      liveSync = false;
+      const btn = document.getElementById('btn-live-sync');
+      const syncBtn = document.getElementById('btn-sync-now');
+      if (btn) { btn.classList.remove('active'); btn.textContent = 'Staged'; }
+      if (syncBtn) syncBtn.style.display = '';
+    }
+
+    // Restore images and mode
+    const savedMode = s.currentMode || 'landing';
+    const savedMapW = s.mapWidth || 0;
+    const savedMapH = s.mapHeight || 0;
+
+    // Restore activePresetIdx
+    if (s.activePresetIdx != null) activePresetIdx = s.activePresetIdx;
+
+    // Restore active fog context (defaults to map for legacy state).
+    if (s.fogContext === 'show' || s.fogContext === 'map') {
+      fogContext = s.fogContext;
+    }
+
+    // Load map library
+    loadMapLibrary();
+    renderMapLibrary();
+
+    // Restore map/fog state — only when active context is 'map'.
+    // (Show-fog state lives entirely in per-image storage and is reloaded on
+    // entry to image-fog mode; we don't auto-resume show-fog mode here because
+    // it requires the sidecar image to already be loaded.)
+    if (s.lastMapSrc && s.fogInitialized && fogContext === 'map') {
+      const img = new Image();
+      img.onload = () => {
+        fogImage = img;
+        loadedImage = img;
+        mapWidth = savedMapW || img.width;
+        mapHeight = savedMapH || img.height;
+        const perMapFog = loadPerMapFog(s.lastMapSrc, mapWidth * mapHeight);
+        fogMask = perMapFog || (s.fogRLE ? rlDecode(s.fogRLE, mapWidth * mapHeight) : new Uint8Array(mapWidth * mapHeight));
+        fogInitialized = true;
+        ensureDefaultPreset();
+        fogHistory = [new Uint8Array(fogMask)];
+        fogHistoryIdx = 0;
+        updateMapThumbnail(img.src, s.lastMapName);
+
+        if (savedMode === 'fog') {
+          startFogMode();
+          setTimeout(() => sendProjectionSettings(), 200);
+        } else {
+          document.getElementById('mode-buttons').style.display = 'flex';
+        }
+      };
+      img.onerror = () => console.warn('[GM Display] Failed to reload map image');
+      img.src = s.lastMapSrc;
+    }
+
+    // Restore sidecar image
+    if (s.lastShowSrc) {
+      const img = new Image();
+      img.onload = () => {
+        updateShowThumbnail(img.src, s.lastShowName);
+        if (savedMode === 'image') {
+          loadedImage = img;
+          mapWidth = img.width;
+          mapHeight = img.height;
+          startImageMode(s.lastShowName || '');
+          setTimeout(() => {
+            computeViewportCrop();
+            sendCropUpdate();
+          }, 200);
+        } else if (savedMode === 'fog' && fogContext === 'show') {
+          // Resume show-fog editing — needs the sidecar image loaded first.
+          loadedImage = img;
+          startImageFogMode();
+        }
+      };
+      img.onerror = () => console.warn('[GM Display] Failed to reload sidecar image');
+      img.src = s.lastShowSrc;
+    }
+
+    // If neither fog nor image, stay on landing but show mode buttons if we have an image
+    if (savedMode === 'landing' && (s.lastMapSrc || s.lastShowSrc)) {
+      document.getElementById('mode-buttons').style.display = 'flex';
+    }
+
+    console.log('[GM Display] State restored from localStorage');
+  } catch (e) {
+    console.warn('[GM Display] Failed to restore state:', e);
+  }
+}
+
+// Read the active sidecar fog (if any) for a given image src. Returns
+// { mask, w, h } or null. Used by sendShowContent to auto-apply stored fog
+// when a handout is displayed on the sidecar.
+function loadShowFogForSrc(src) {
+  if (!src || src.startsWith('data:')) return null;
+  try {
+    const raw = localStorage.getItem('gm-display-fog:show:' + src);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (data.presets && Array.isArray(data.presets) && data.presets.length > 0) {
+      const idx = data.activeIdx || 0;
+      const p = data.presets[idx] || data.presets[0];
+      if (p && p.rle && p.w && p.h) {
+        return { mask: rlDecode(p.rle, p.w * p.h), w: p.w, h: p.h };
+      }
+    }
+  } catch (e) {
+    console.warn('[GM Display] Failed to read show fog:', e);
+  }
+  return null;
+}
+
+// Single entry point for "show this image on the sidecar". If the user has
+// previously painted fog over this handout, send it via fog-init/fog-update so
+// the sidecar renders image+fog. Otherwise send plain show-image.
+function sendShowContent(src, crop) {
+  if (!showChannel || !src) return;
+  const fog = loadShowFogForSrc(src);
+  if (fog) {
+    showChannel.postMessage({ type: 'fog-init', imageSrc: src, width: fog.w, height: fog.h });
+    setTimeout(() => {
+      showChannel.postMessage({
+        type: 'fog-update',
+        imageSrc: src,
+        fogMask: Array.from(fog.mask),
+        width: fog.w,
+        height: fog.h,
+        crop: crop
+      });
+    }, 50);
+  } else {
+    showChannel.postMessage({ type: 'show-image', imageSrc: src, crop: crop });
+  }
+}
+
+// === Fog Context (map vs show) ===
+// Returns the storage prefix for the active fog context's per-image entry.
+function fogStoragePrefix() {
+  return fogContext === 'show' ? 'gm-display-fog:show:' : 'gm-display-fog:';
+}
+
+// Snapshot the live fog globals so we can restore them when the user comes
+// back to this context.
+function snapshotCurrentFog() {
+  return {
+    mask: fogMask,
+    image: fogImage,
+    w: mapWidth,
+    h: mapHeight,
+    presets: fogPresets,
+    activeIdx: activePresetIdx,
+    history: fogHistory,
+    historyIdx: fogHistoryIdx,
+    initialized: fogInitialized,
+    initializedSrc: lastInitializedFogSrc,
+  };
+}
+
+function applyFogSnapshot(s) {
+  if (s) {
+    fogMask = s.mask;
+    fogImage = s.image;
+    mapWidth = s.w;
+    mapHeight = s.h;
+    fogPresets = s.presets || [];
+    activePresetIdx = s.activeIdx || 0;
+    fogHistory = s.history || [];
+    fogHistoryIdx = (s.historyIdx == null ? -1 : s.historyIdx);
+    fogInitialized = !!s.initialized;
+    lastInitializedFogSrc = s.initializedSrc || null;
+  } else {
+    // Empty context — caller should load fresh state from storage if a src is known.
+    fogMask = null;
+    fogImage = null;
+    mapWidth = 0;
+    mapHeight = 0;
+    fogPresets = [];
+    activePresetIdx = 0;
+    fogHistory = [];
+    fogHistoryIdx = -1;
+    fogInitialized = false;
+    lastInitializedFogSrc = null;
+  }
+}
+
+// Switch the active fog context. Stashes the current globals into the outgoing
+// context's slot and restores the incoming context's stash (if any).
+function setFogContext(target) {
+  if (target !== 'map' && target !== 'show') return;
+  if (target === fogContext) return;
+  const snap = snapshotCurrentFog();
+  if (fogContext === 'map') stashedMapFog = snap;
+  else stashedShowFog = snap;
+  fogContext = target;
+  applyFogSnapshot(target === 'map' ? stashedMapFog : stashedShowFog);
+  updateUndoRedoButtons();
+}
+
+// Channel the active fog context syncs to.
+function activeFogChannel() {
+  return fogContext === 'show' ? showChannel : mapChannel;
+}
+
+// Per-map fog persistence — now supports multiple presets per map
+const FOG_KEY_PREFIX = 'gm-display-fog:';
+
+function savePerMapFog(mapSrc) {
+  if (!mapSrc || mapSrc.startsWith('data:')) return;
+  try {
+    // Save active preset's current fogMask into the presets array
+    if (fogMask && fogPresets[activePresetIdx]) {
+      fogPresets[activePresetIdx].rle = rlEncode(fogMask);
+      fogPresets[activePresetIdx].w = mapWidth;
+      fogPresets[activePresetIdx].h = mapHeight;
+    }
+    // Persist entire presets array under the active context's key
+    const data = { presets: fogPresets, activeIdx: activePresetIdx };
+    localStorage.setItem(fogStoragePrefix() + mapSrc, JSON.stringify(data));
+  } catch (e) {
+    console.warn('[GM Display] Failed to save per-map fog:', e);
+  }
+}
+
+function loadPerMapFog(mapSrc, expectedLen) {
+  if (!mapSrc || mapSrc.startsWith('data:')) return null;
+  try {
+    const raw = localStorage.getItem(fogStoragePrefix() + mapSrc);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+
+    // New format: { presets: [...], activeIdx: N }
+    if (data.presets && Array.isArray(data.presets)) {
+      fogPresets = data.presets;
+      activePresetIdx = data.activeIdx || 0;
+      if (activePresetIdx >= fogPresets.length) activePresetIdx = 0;
+      const p = fogPresets[activePresetIdx];
+      if (p && p.rle) return rlDecode(p.rle, expectedLen);
+      return null;
+    }
+
+    // Legacy format: { rle: [...], w, h } — migrate to single preset
+    if (data.rle) {
+      const mask = rlDecode(data.rle, expectedLen);
+      fogPresets = [{ name: 'Default', rle: data.rle, w: data.w, h: data.h }];
+      activePresetIdx = 0;
+      return mask;
+    }
+  } catch (e) {
+    console.warn('[GM Display] Failed to load per-map fog:', e);
+  }
+  return null;
+}
+
+function deletePerMapFog(mapSrc) {
+  if (!mapSrc || mapSrc.startsWith('data:')) return;
+  // Always delete the MAP-context fog (this is only called from the map
+  // library). Don't touch any sidecar fog stored under the same image src.
+  try { localStorage.removeItem('gm-display-fog:' + mapSrc); } catch(e) {}
+}
+
+// === Map Library (persisted list of all loaded maps) ===
+function loadMapLibrary() {
+  try {
+    const raw = localStorage.getItem(MAP_LIBRARY_KEY);
+    mapLibrary = raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    mapLibrary = [];
+  }
+}
+
+function saveMapLibrary() {
+  try {
+    localStorage.setItem(MAP_LIBRARY_KEY, JSON.stringify(mapLibrary));
+  } catch (e) {
+    console.warn('[GM Display] Failed to save map library:', e);
+  }
+}
+
+function addToMapLibrary(src, name) {
+  if (!src || src.startsWith('data:')) return;
+  // Don't duplicate
+  const existing = mapLibrary.findIndex(m => m.src === src);
+  if (existing >= 0) {
+    // Update name if changed
+    if (name) mapLibrary[existing].name = name;
+  } else {
+    mapLibrary.push({ src, name: name || src.split('/').pop() });
+  }
+  saveMapLibrary();
+  renderMapLibrary();
+}
+
+function removeFromMapLibrary(idx) {
+  if (idx < 0 || idx >= mapLibrary.length) return;
+  const entry = mapLibrary[idx];
+  deletePerMapFog(entry.src);
+  mapLibrary.splice(idx, 1);
+  saveMapLibrary();
+  renderMapLibrary();
+}
+
+function renameMapInLibrary(idx, newName) {
+  if (idx < 0 || idx >= mapLibrary.length) return;
+  const entry = mapLibrary[idx];
+  entry.name = newName;
+  saveMapLibrary();
+  // If this is the currently-loaded map, update the live label/state too
+  if (entry.src === lastMapSrc) {
+    lastMapName = newName;
+    updateMapThumbnail(entry.src, newName);
+    saveState();
+  }
+  renderMapLibrary();
+}
+
+function renderMapLibrary() {
+  const container = document.getElementById('map-library-list');
+  const wrapper = document.getElementById('map-library');
+  if (!container || !wrapper) return;
+
+  if (mapLibrary.length === 0) {
+    wrapper.style.display = 'none';
+    return;
+  }
+  wrapper.style.display = '';
+
+  container.innerHTML = '';
+  mapLibrary.forEach((entry, idx) => {
+    const card = document.createElement('div');
+    card.className = 'map-lib-card' + (entry.src === lastMapSrc ? ' active' : '');
+    card.draggable = true;
+    card.dataset.idx = idx;
+    card.title = decodeURIComponent(entry.name || '');
+
+    const img = document.createElement('img');
+    img.src = entry.src;
+    img.onerror = () => { img.style.display = 'none'; };
+    card.appendChild(img);
+
+    const label = document.createElement('div');
+    label.className = 'lib-label';
+    label.textContent = decodeURIComponent((entry.name || '').split('/').pop());
+    label.title = 'Double-click to rename';
+    label.ondblclick = (e) => {
+      e.stopPropagation();
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = decodeURIComponent(entry.name || '');
+      input.style.cssText = 'width:100%;background:#222;color:#eee;border:1px solid #6a4;font-size:10px;padding:1px 4px;text-align:center;box-sizing:border-box;';
+      const commit = () => {
+        const v = (input.value || '').trim();
+        if (v) renameMapInLibrary(idx, v);
+        else renderMapLibrary();
+      };
+      input.onblur = commit;
+      input.onkeydown = (ke) => {
+        if (ke.key === 'Enter') input.blur();
+        else if (ke.key === 'Escape') { input.value = entry.name; input.blur(); }
+      };
+      label.replaceWith(input);
+      input.focus();
+      input.select();
+    };
+    card.appendChild(label);
+
+    const del = document.createElement('button');
+    del.className = 'lib-delete';
+    del.textContent = '×';
+    del.title = 'Remove from library';
+    del.onclick = (e) => { e.stopPropagation(); removeFromMapLibrary(idx); };
+    card.appendChild(del);
+
+    card.onclick = (e) => {
+      // Don't load when clicking the label being renamed (input has focus)
+      if (e.target.tagName === 'INPUT') return;
+      loadMapFromLibrary(idx);
+    };
+
+    // Drag-to-reorder
+    card.ondragstart = (e) => { e.dataTransfer.setData('text/plain', idx); card.style.opacity = '0.5'; };
+    card.ondragend = () => { card.style.opacity = '1'; };
+    card.ondragover = (e) => { e.preventDefault(); card.classList.add('drag-over'); };
+    card.ondragleave = () => { card.classList.remove('drag-over'); };
+    card.ondrop = (e) => {
+      e.preventDefault();
+      card.classList.remove('drag-over');
+      const fromIdx = parseInt(e.dataTransfer.getData('text/plain'));
+      if (fromIdx !== idx) {
+        const item = mapLibrary.splice(fromIdx, 1)[0];
+        mapLibrary.splice(idx, 0, item);
+        saveMapLibrary();
+        renderMapLibrary();
+      }
+    };
+
+    container.appendChild(card);
+  });
+}
+
+function loadMapFromLibrary(idx) {
+  const entry = mapLibrary[idx];
+  if (!entry) return;
+  const img = new Image();
+  img.onload = () => {
+    setFogContext('map');
+    loadedImage = img;
+    fogImage = img;
+    updateMapThumbnail(img.src, entry.name);
+    startFogMode();
+  };
+  img.onerror = () => setStatus(`Failed to load: ${entry.name}`);
+  img.src = entry.src;
+}
+
+// === Init ===
+function init() {
+  const params = new URLSearchParams(window.location.search);
+
+  if (params.get('mode') === 'player') {
+    isPlayerView = true;
+    playerDisplay = params.get('display') || 'map';
+    document.getElementById('landing').style.display = 'none';
+    document.getElementById('player-view').style.display = 'flex';
+    document.getElementById('status-bar').style.display = 'none';
+    document.title = playerDisplay === 'map' ? 'Projector (Maps)' : 'Sidecar (Images)';
+    setupPlayerChannel();
+    return;
+  }
+
+  // --- GM control page ---
+  const dropZone = document.getElementById('drop-zone');
+  const fileInput = document.getElementById('file-input');
+  dropZone.addEventListener('click', () => fileInput.click());
+  dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+  dropZone.addEventListener('drop', (e) => {
+    e.preventDefault(); dropZone.classList.remove('dragover');
+    if (e.dataTransfer.files.length) loadFile(e.dataTransfer.files[0]);
+  });
+  fileInput.addEventListener('change', (e) => { if (e.target.files.length) loadFile(e.target.files[0]); });
+
+  const brushEl = document.getElementById('brush-size');
+  if (brushEl) brushEl.addEventListener('input', (e) => { brushSize = parseInt(e.target.value); updateBrushPreview(); saveState(); });
+  updateBrushPreview();
+  initCornerDrag();
+  initImageNameRename();
+
+  mapChannel = new BroadcastChannel('gm-display-map');
+  showChannel = new BroadcastChannel('gm-display-show');
+
+  // Track whether we've synced to each display since GM page load
+  let mapSynced = false;
+  let showSynced = false;
+  // Track whether we've received an authoritative screen size for each display.
+  // Until we have, accept any size; afterwards, ignore tiny flickers via hysteresis.
+  let mapSizeKnown = false;
+  let showSizeKnown = false;
+
+  // Hysteresis: ignore tiny size changes on heartbeat so scrollbar/layout
+  // transients don't cause the viewport-outline to flicker. Any genuine
+  // user-driven window resize will easily exceed this threshold.
+  const SIZE_FLICKER_PX = 32;
+  const sizeChangedSignificantly = (oldW, oldH, newW, newH) =>
+    Math.abs(oldW - newW) >= SIZE_FLICKER_PX || Math.abs(oldH - newH) >= SIZE_FLICKER_PX;
+
+  // Process a screen-size update from a player. Returns true if a recompute fired.
+  const applyScreenInfo = (channel, screenW, screenH) => {
+    if (!screenW || !screenH) return false;
+    if (channel === 'map') {
+      const changed = !mapSizeKnown ||
+        sizeChangedSignificantly(projectorW, projectorH, screenW, screenH);
+      if (!changed) return false;
+      projectorW = screenW; projectorH = screenH; mapSizeKnown = true;
+      if (currentMode === 'fog' && cropZoom > 1.01) {
+        computeViewportCrop();
+        updateViewportOutline();
+        sendCropUpdate();
+      }
+    } else {
+      const changed = !showSizeKnown ||
+        sizeChangedSignificantly(sidecarW, sidecarH, screenW, screenH);
+      if (!changed) return false;
+      sidecarW = screenW; sidecarH = screenH; showSizeKnown = true;
+      if (currentMode === 'image' && Math.abs(cropZoom - 1.0) > 0.01) {
+        computeViewportCrop();
+        updateViewportOutline();
+        sendCropUpdate();
+      }
+    }
+    return true;
+  };
+
+  mapChannel.onmessage = (e) => {
+    if (e.data.type === 'heartbeat') {
+      updateDisplayStatus('map', true);
+      applyScreenInfo('map', e.data.screenW, e.data.screenH);
+      // On first heartbeat after GM refresh, push full state to projector
+      if (!mapSynced) {
+        mapSynced = true;
+        if (fogInitialized && fogMask && fogImage) {
+          syncToMapDisplay();
+          sendProjectionSettings();
+        }
+      }
+    }
+    if (e.data.type === 'request-sync') {
+      applyScreenInfo('map', e.data.screenW, e.data.screenH);
+      syncToMapDisplay();
+      sendProjectionSettings();
+    }
+  };
+  showChannel.onmessage = (e) => {
+    if (e.data.type === 'heartbeat') {
+      updateDisplayStatus('show', true);
+      applyScreenInfo('show', e.data.screenW, e.data.screenH);
+      // On first heartbeat after GM refresh, push image (with stored fog if any) and rotation
+      if (!showSynced) {
+        showSynced = true;
+        if (lastShowSrc) sendShowContent(lastShowSrc, viewportCrop);
+        sendShowSettings();
+      }
+    }
+    if (e.data.type === 'request-sync') {
+      applyScreenInfo('show', e.data.screenW, e.data.screenH);
+      // Re-send current sidecar image with crop, plus sidecar rotation
+      if (lastShowSrc) sendShowContent(lastShowSrc, viewportCrop);
+      sendShowSettings();
+    }
+  };
+
+  startPolling();
+  loadMapLibrary();
+
+  const action = params.get('action');
+  const filePath = params.get('file');
+  if (filePath) {
+    handleCommand({ action: action || 'show', file: filePath });
+    renderMapLibrary();
+  } else {
+    // No incoming command — restore previous session
+    restoreState();
+  }
+}
+
+// === Display Status ===
+let mapConnected = false, showConnected = false;
+function updateDisplayStatus(which, connected) {
+  if (which === 'map') {
+    mapConnected = connected;
+    document.getElementById('map-status').innerHTML = connected
+      ? '<span class="status-on">connected</span>'
+      : '<span class="status-off">not connected</span>';
+  } else {
+    showConnected = connected;
+    document.getElementById('show-status').innerHTML = connected
+      ? '<span class="status-on">connected</span>'
+      : '<span class="status-off">not connected</span>';
+  }
+}
+
+// === Thumbnail Updates ===
+function updateMapThumbnail(src, name) {
+  lastMapSrc = src;
+  lastMapName = name || '';
+  const thumb = document.getElementById('map-thumb');
+  const empty = document.getElementById('map-thumb-empty');
+  const label = document.getElementById('map-thumb-label');
+  if (src) {
+    thumb.src = src;
+    thumb.style.display = 'block';
+    empty.style.display = 'none';
+    label.textContent = decodeURIComponent(name || '');
+    label.style.display = name ? 'block' : 'none';
+  }
+}
+
+function updateShowThumbnail(src, name) {
+  lastShowSrc = src;
+  lastShowName = name || '';
+  const thumb = document.getElementById('show-thumb');
+  const empty = document.getElementById('show-thumb-empty');
+  const label = document.getElementById('show-thumb-label');
+  if (src) {
+    thumb.src = src;
+    thumb.style.display = 'block';
+    empty.style.display = 'none';
+    label.textContent = decodeURIComponent(name || '');
+    label.style.display = name ? 'block' : 'none';
+  }
+}
+
+// === Open Display Windows ===
+function openDisplay(type) {
+  const url = window.location.pathname + '?mode=player&display=' + type;
+  const name = type === 'map' ? 'gm-projector' : 'gm-sidecar';
+  const w = window.open(url, name, 'popup');
+  if (w) setStatus(`${type === 'map' ? 'Projector' : 'Sidecar'} window opened — drag to screen, F11 for fullscreen`);
+}
+
+// === Command Polling ===
+function startPolling() {
+  pollTimer = setInterval(async () => {
+    try {
+      const resp = await fetch('/api/command');
+      const cmd = await resp.json();
+      if (cmd) handleCommand(cmd);
+    } catch(e) {}
+  }, 300);
+}
+
+function handleCommand(cmd) {
+  const action = cmd.action || 'show';
+  const filePath = cmd.file;
+  if (!filePath) return;
+
+  const shortName = decodeURIComponent(filePath.split('/').pop());
+  console.log(`[GM Display] Command: ${action} -> ${filePath}`);
+  setStatus(`Received: ${action} ${shortName}`);
+
+  if (action === 'show') {
+    const img = new Image();
+    img.onload = () => {
+      loadedImage = img;
+      // Store image dimensions for crop calculations
+      mapWidth = img.width;
+      mapHeight = img.height;
+      sendShowContent(img.src, viewportCrop);
+      setStatus(`Sidecar: ${shortName}`);
+      updateShowThumbnail(img.src, shortName);
+      if (currentMode === 'landing') {
+        startImageMode(filePath);
+      }
+    };
+    img.onerror = () => setStatus(`Failed to load: ${filePath}`);
+    img.src = filePath;
+
+  } else if (action === 'map') {
+    setStatus(`Loading map: ${shortName}`);
+    const img = new Image();
+    img.onload = () => {
+      setFogContext('map');
+      loadedImage = img;
+      fogImage = img;
+      updateMapThumbnail(img.src, shortName);
+      startFogMode();
+    };
+    img.onerror = () => { console.error(`Failed to load map: ${filePath}`); setStatus(`FAILED: ${filePath}`); };
+    img.src = filePath;
+  }
+}
+
+// === File Loading (drag & drop) ===
+function loadFile(file) {
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const img = new Image();
+    img.onload = () => {
+      loadedImage = img;
+      document.getElementById('mode-buttons').style.display = 'flex';
+      document.getElementById('drop-zone').innerHTML = `<span>${file.name}</span><small>${img.width} x ${img.height}</small>`;
+      setStatus(`Loaded: ${file.name}`);
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+// === Image Display Mode (-> sidecar) ===
+function startImageMode(filename) {
+  currentMode = 'image';
+  document.getElementById('landing').style.display = 'none';
+  document.getElementById('fog-gm').style.display = 'none';
+  document.getElementById('image-display').style.display = 'flex';
+  document.getElementById('display-image').src = loadedImage.src;
+  // Ensure map dimensions are set for crop calculations
+  mapWidth = loadedImage.width;
+  mapHeight = loadedImage.height;
+
+  const shortName = (filename || 'file').split('/').pop().replace(/%20/g, ' ');
+  document.getElementById('img-filename').textContent = decodeURIComponent(shortName);
+  document.getElementById('img-dest-label').textContent = 'Showing on sidecar';
+  setStatus(`Image -> Sidecar: ${decodeURIComponent(shortName)}`);
+
+  updateShowThumbnail(loadedImage.src, filename || '');
+  sendShowContent(loadedImage.src, viewportCrop);
+  saveState();
+}
+
+function resumeImageMode() {
+  if (!lastShowSrc) return;
+  currentMode = 'image';
+  document.getElementById('landing').style.display = 'none';
+  document.getElementById('fog-gm').style.display = 'none';
+  document.getElementById('image-display').style.display = 'flex';
+  const dispImg = document.getElementById('display-image');
+  dispImg.src = lastShowSrc;
+
+  // Re-anchor loadedImage to the sidecar image — a stray gm://map/... click
+  // can leave loadedImage pointing at a map, which then bleeds into actions
+  // that take place from image-display (like Edit Fog).
+  if (!loadedImage || loadedImage.src !== lastShowSrc) {
+    const img = new Image();
+    img.onload = () => {
+      loadedImage = img;
+      mapWidth = img.width;
+      mapHeight = img.height;
+    };
+    img.src = lastShowSrc;
+  } else {
+    mapWidth = loadedImage.width;
+    mapHeight = loadedImage.height;
+  }
+
+  document.getElementById('img-filename').textContent = lastShowName || '';
+  document.getElementById('img-dest-label').textContent = 'Showing on sidecar';
+  setStatus(`Previewing: ${lastShowName}`);
+  saveState();
+}
+
+// === Fog of War Mode (works for both projector and sidecar via fogContext) ===
+function startFogMode() {
+  currentMode = 'fog';
+  document.getElementById('landing').style.display = 'none';
+  document.getElementById('image-display').style.display = 'none';
+  document.getElementById('fog-gm').style.display = 'block';
+
+  const img = fogImage || loadedImage;
+  if (!img) return;
+
+  // Detect new image for this context. Track the last fully-initialized src
+  // separately because callers pre-set fogImage/lastMapSrc before we run.
+  const incomingDifferent = (img.src !== lastInitializedFogSrc);
+  if (incomingDifferent) fogInitialized = false;
+
+  // Resolve which "last src" to compare against (per active context).
+  const lastSrcForCtx = fogContext === 'show' ? lastShowSrc : lastMapSrc;
+
+  const mapCanvas = document.getElementById('gm-map-canvas');
+  const isNewMap = incomingDifferent || !fogInitialized || !mapCanvas.width;
+
+  if (isNewMap) {
+    // Save current fog for the previous image (in this context) before switching
+    if (lastInitializedFogSrc && fogMask && lastInitializedFogSrc !== img.src) {
+      // Temporarily restore fogMask/presets back to the previous src so save uses
+      // the right key. Easiest: just write under the previous src directly.
+      try {
+        const prevData = { presets: fogPresets, activeIdx: activePresetIdx };
+        localStorage.setItem(fogStoragePrefix() + lastInitializedFogSrc, JSON.stringify(prevData));
+      } catch(e) {}
+    }
+
+    fogImage = img;
+    mapWidth = img.width;
+    mapHeight = img.height;
+
+    // Try to restore saved fog (and presets) for this image, in the active context
+    const savedFog = loadPerMapFog(img.src, mapWidth * mapHeight);
+    fogMask = savedFog || new Uint8Array(mapWidth * mapHeight);
+    fogInitialized = true;
+    lastInitializedFogSrc = img.src;
+
+    // Ensure at least one preset exists
+    ensureDefaultPreset();
+
+    // Add to map library only when editing fog on the projector (maps).
+    if (fogContext === 'map') {
+      addToMapLibrary(img.src, lastMapName);
+    }
+
+    // Reset fog history for the new image
+    fogHistory = [new Uint8Array(fogMask)];
+    fogHistoryIdx = 0;
+    updateUndoRedoButtons();
+
+    // Reset crop for new image
+    resetCrop();
+
+    const ch = activeFogChannel();
+    if (ch) {
+      if (fogContext === 'map' && !liveSync) {
+        markPendingSync();
+      } else {
+        ch.postMessage({ type: 'fog-init', imageSrc: img.src, width: mapWidth, height: mapHeight });
+        setTimeout(() => {
+          forceSyncToMapDisplay();
+          if (fogContext === 'map') sendProjectionSettings();
+          else sendShowSettings();
+        }, 100);
+      }
+    }
+
+    if (fogContext === 'map') {
+      updateMapThumbnail(img.src, lastMapName);
+    } else {
+      updateShowThumbnail(img.src, lastShowName);
+    }
+  }
+
+  // Always sync canvas dims to current image and redraw the map. This is cheap
+  // and protects against stale dims from a previous fog session in the other
+  // context (e.g., switching from a map back to a sidecar handout).
+  const fogCanvas = document.getElementById('gm-fog-canvas');
+  if (mapCanvas.width !== mapWidth || mapCanvas.height !== mapHeight) {
+    mapCanvas.width = mapWidth; mapCanvas.height = mapHeight;
+    fogCanvas.width = mapWidth; fogCanvas.height = mapHeight;
+  }
+  mapCanvas.getContext('2d').drawImage(img, 0, 0);
+
+  // Always (re)attach fog painting handlers when entering fog mode — defensive
+  // against any case where the canvas previously lost them.
+  attachFogCanvasHandlers();
+  // Reflect target in the toolbar's home button + status line
+  updateFogModeChrome();
+
+  renderGMFog();
+  renderPresetThumbnails();
+  setStatus(fogContext === 'show'
+    ? 'Editing fog on sidecar handout. R/H = reveal/hide, C = crop. Esc to exit.'
+    : 'Fog of War -> Projector. R/H = reveal/hide, C = crop, P = projection/grid');
+  saveState();
+}
+
+// Entry point: edit fog over the currently-shown sidecar image.
+// Always reload from lastShowSrc rather than trusting loadedImage — a
+// gm://map/... click can overwrite loadedImage while the user sits on
+// image-display, and we'd otherwise end up editing fog for the map.
+function startImageFogMode() {
+  if (!lastShowSrc) {
+    setStatus('Load an image on the sidecar first.');
+    return;
+  }
+  setFogContext('show');
+  const img = new Image();
+  img.onload = () => {
+    loadedImage = img;
+    fogImage = img;
+    startFogMode();
+  };
+  img.onerror = () => setStatus('Failed to load sidecar image: ' + lastShowSrc);
+  img.src = lastShowSrc;
+}
+
+// Cosmetic: update visible chrome to indicate which target is being painted.
+function updateFogModeChrome() {
+  // Keystone, scale, grid, test pattern, live-sync, and projection panel are
+  // projector-only; hide them while editing sidecar fog.
+  const projectorOnly = ['btn-projection', 'btn-live-sync', 'btn-sync-now'];
+  const isShow = fogContext === 'show';
+  projectorOnly.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = isShow ? 'none' : '';
+  });
+  // Close the projection panel if it's open in show context
+  if (isShow) {
+    const p = document.getElementById('projection-panel');
+    if (p) p.style.display = 'none';
+  }
+}
+
+function resumeFogMode() {
+  if (!fogInitialized || !fogImage) return;
+  currentMode = 'fog';
+  document.getElementById('landing').style.display = 'none';
+  document.getElementById('image-display').style.display = 'none';
+  document.getElementById('fog-gm').style.display = 'block';
+
+  // Restore map dimensions (image mode may have changed them)
+  mapWidth = fogImage.width;
+  mapHeight = fogImage.height;
+
+  // Ensure canvases match fog image dimensions and redraw the map
+  const mapCanvas = document.getElementById('gm-map-canvas');
+  const fogCanvas = document.getElementById('gm-fog-canvas');
+  if (mapCanvas.width !== mapWidth || mapCanvas.height !== mapHeight) {
+    mapCanvas.width = mapWidth;
+    mapCanvas.height = mapHeight;
+    fogCanvas.width = mapWidth;
+    fogCanvas.height = mapHeight;
+  }
+  mapCanvas.getContext('2d').drawImage(fogImage, 0, 0);
+
+  attachFogCanvasHandlers();
+
+  renderGMFog();
+  renderPresetThumbnails();
+  computeViewportCrop();
+  updateViewportOutline();
+  setStatus('Fog of War -> Projector. R/H = reveal/hide, C = crop, P = projection/grid');
+  saveState();
+}
+
+// Inline rename for sidecar image filename: double-click to edit.
+function initImageNameRename() {
+  const el = document.getElementById('img-filename');
+  if (!el) return;
+  el.style.cursor = 'text';
+  el.title = 'Double-click to rename';
+  el.ondblclick = (e) => {
+    e.stopPropagation();
+    if (!lastShowSrc) return;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = decodeURIComponent(lastShowName || '');
+    input.style.cssText = 'background:#222;color:#eee;border:1px solid #6a4;font-size:13px;padding:2px 6px;border-radius:3px;width:100%;box-sizing:border-box;';
+    const commit = () => {
+      const v = (input.value || '').trim();
+      if (v) renameSidecarImage(v);
+      else el.textContent = decodeURIComponent(lastShowName || '');
+      input.replaceWith(el);
+    };
+    input.onblur = commit;
+    input.onkeydown = (ke) => {
+      if (ke.key === 'Enter') input.blur();
+      else if (ke.key === 'Escape') { input.value = lastShowName || ''; input.blur(); }
+    };
+    el.replaceWith(input);
+    input.focus();
+    input.select();
+  };
+}
+
+function renameSidecarImage(newName) {
+  if (!lastShowSrc) return;
+  lastShowName = newName;
+  // Update both the image-info filename and the landing-page thumbnail label.
+  const fnEl = document.getElementById('img-filename');
+  if (fnEl) fnEl.textContent = decodeURIComponent(newName);
+  updateShowThumbnail(lastShowSrc, newName);
+  saveState();
+}
+
+// Attach (or re-attach) the painting handlers on the GM fog canvas. Idempotent.
+function attachFogCanvasHandlers() {
+  const fogCanvas = document.getElementById('gm-fog-canvas');
+  if (!fogCanvas) return;
+  fogCanvas.style.cursor = 'crosshair';
+  fogCanvas.onmousedown = (e) => { painting = true; paintAt(e); };
+  fogCanvas.onmousemove = (e) => { if (painting) paintAt(e); };
+  fogCanvas.onmouseup = () => { painting = false; pushFogHistory(); syncToMapDisplay(); renderPresetThumbnails(); saveState(); };
+  fogCanvas.onmouseleave = () => { if (painting) { painting = false; pushFogHistory(); syncToMapDisplay(); renderPresetThumbnails(); saveState(); } };
+}
+
+function paintAt(e) {
+  const canvas = document.getElementById('gm-fog-canvas');
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = mapWidth / rect.width;
+  const scaleY = mapHeight / rect.height;
+  const cx = Math.floor((e.clientX - rect.left) * scaleX);
+  const cy = Math.floor((e.clientY - rect.top) * scaleY);
+  const r = Math.floor(brushSize * scaleX);
+  const val = currentTool === 'reveal' ? 255 : 0;
+
+  for (let dy = -r; dy <= r; dy++) {
+    for (let dx = -r; dx <= r; dx++) {
+      if (dx*dx + dy*dy <= r*r) {
+        const px = cx + dx, py = cy + dy;
+        if (px >= 0 && px < mapWidth && py >= 0 && py < mapHeight)
+          fogMask[py * mapWidth + px] = val;
+      }
+    }
+  }
+  renderGMFog();
+  if (!window._syncTimer) {
+    window._syncTimer = setTimeout(() => { syncToMapDisplay(); window._syncTimer = null; }, 50);
+  }
+}
+
+function renderGMFog() {
+  if (!fogMask || !mapWidth || !mapHeight) return;
+  const canvas = document.getElementById('gm-fog-canvas');
+  const ctx = canvas.getContext('2d');
+  // Ensure canvas dimensions match current map
+  if (canvas.width !== mapWidth || canvas.height !== mapHeight) {
+    canvas.width = mapWidth;
+    canvas.height = mapHeight;
+  }
+  const imgData = ctx.createImageData(mapWidth, mapHeight);
+  const d = imgData.data;
+  const len = Math.min(fogMask.length, mapWidth * mapHeight);
+  for (let i = 0; i < len; i++) {
+    if (fogMask[i] === 0) { const idx = i*4; d[idx]=0; d[idx+1]=0; d[idx+2]=0; d[idx+3]=160; }
+  }
+  ctx.putImageData(imgData, 0, 0);
+}
+
+function revealAll() { fogMask.fill(255); pushFogHistory(); renderGMFog(); syncToMapDisplay(); renderPresetThumbnails(); saveState(); }
+function hideAll() { fogMask.fill(0); pushFogHistory(); renderGMFog(); syncToMapDisplay(); renderPresetThumbnails(); saveState(); }
+
+// --- Fog undo/redo ---
+function pushFogHistory() {
+  if (!fogMask) return;
+  // Discard any redo states beyond current position
+  fogHistory = fogHistory.slice(0, fogHistoryIdx + 1);
+  // Push a copy of the current fog mask
+  fogHistory.push(new Uint8Array(fogMask));
+  // Trim to max size
+  if (fogHistory.length > FOG_HISTORY_MAX) {
+    fogHistory.shift();
+  }
+  fogHistoryIdx = fogHistory.length - 1;
+  updateUndoRedoButtons();
+}
+
+function fogUndo() {
+  if (fogHistoryIdx <= 0 || !fogMask) return;
+  fogHistoryIdx--;
+  fogMask = new Uint8Array(fogHistory[fogHistoryIdx]);
+  renderGMFog();
+  syncToMapDisplay();
+  renderPresetThumbnails();
+  saveState();
+  updateUndoRedoButtons();
+}
+
+function fogRedo() {
+  if (fogHistoryIdx >= fogHistory.length - 1 || !fogMask) return;
+  fogHistoryIdx++;
+  fogMask = new Uint8Array(fogHistory[fogHistoryIdx]);
+  renderGMFog();
+  syncToMapDisplay();
+  renderPresetThumbnails();
+  saveState();
+  updateUndoRedoButtons();
+}
+
+function updateUndoRedoButtons() {
+  const undoBtn = document.getElementById('btn-fog-undo');
+  const redoBtn = document.getElementById('btn-fog-redo');
+  if (undoBtn) undoBtn.disabled = fogHistoryIdx <= 0;
+  if (redoBtn) redoBtn.disabled = fogHistoryIdx >= fogHistory.length - 1;
+}
+
+// === Fog Presets ===
+function ensureDefaultPreset() {
+  if (fogPresets.length === 0) {
+    fogPresets = [{ name: 'Default', rle: fogMask ? rlEncode(fogMask) : [], w: mapWidth, h: mapHeight }];
+    activePresetIdx = 0;
+  }
+}
+
+function newPreset(type) {
+  if (!mapWidth || !mapHeight) return;
+  const len = mapWidth * mapHeight;
+  const mask = new Uint8Array(len);
+  if (type === 'full') mask.fill(255);
+  const name = (type === 'full' ? 'Revealed' : 'Hidden') + ' ' + (fogPresets.length + 1);
+  const rle = rlEncode(mask);
+  fogPresets.push({ name, rle, w: mapWidth, h: mapHeight });
+  switchToPreset(fogPresets.length - 1);
+  savePerMapFog(lastMapSrc);
+}
+
+function copyPreset() {
+  if (!fogPresets[activePresetIdx]) return;
+  // Save current mask to active preset first
+  if (fogMask) fogPresets[activePresetIdx].rle = rlEncode(fogMask);
+  const src = fogPresets[activePresetIdx];
+  fogPresets.push({ name: src.name + ' copy', rle: [...src.rle], w: src.w, h: src.h });
+  switchToPreset(fogPresets.length - 1);
+  savePerMapFog(lastMapSrc);
+}
+
+function deletePreset(idx) {
+  if (fogPresets.length <= 1) return; // keep at least one
+  const wasActive = (idx === activePresetIdx);
+  fogPresets.splice(idx, 1);
+
+  if (wasActive) {
+    // Deleted the active preset — load the nearest one without saving old mask
+    activePresetIdx = Math.min(idx, fogPresets.length - 1);
+    const p = fogPresets[activePresetIdx];
+    const len = mapWidth * mapHeight;
+    fogMask = p.rle && p.rle.length > 0 ? rlDecode(p.rle, len) : new Uint8Array(len);
+    fogHistory = [new Uint8Array(fogMask)];
+    fogHistoryIdx = 0;
+    updateUndoRedoButtons();
+    renderGMFog();
+    syncToMapDisplay();
+  } else if (idx < activePresetIdx) {
+    activePresetIdx--;
+  }
+  renderPresetThumbnails();
+  savePerMapFog(lastMapSrc);
+}
+
+function switchToPreset(idx) {
+  if (idx < 0 || idx >= fogPresets.length) return;
+  // Save current fog to outgoing preset
+  if (fogMask && fogPresets[activePresetIdx]) {
+    fogPresets[activePresetIdx].rle = rlEncode(fogMask);
+  }
+  activePresetIdx = idx;
+  const p = fogPresets[idx];
+  const len = mapWidth * mapHeight;
+  fogMask = p.rle && p.rle.length > 0 ? rlDecode(p.rle, len) : new Uint8Array(len);
+  // Reset undo history for new preset
+  fogHistory = [new Uint8Array(fogMask)];
+  fogHistoryIdx = 0;
+  updateUndoRedoButtons();
+  renderGMFog();
+  syncToMapDisplay();
+  renderPresetThumbnails();
+  saveState();
+}
+
+function renamePreset(idx, newName) {
+  if (fogPresets[idx]) {
+    fogPresets[idx].name = newName;
+    savePerMapFog(lastMapSrc);
+    renderPresetThumbnails();
+  }
+}
+
+function renderPresetThumbnails() {
+  const container = document.getElementById('fog-presets-list');
+  if (!container) return;
+  container.innerHTML = '';
+
+  fogPresets.forEach((preset, idx) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'fog-preset-thumb' + (idx === activePresetIdx ? ' active' : '');
+    wrap.onclick = () => switchToPreset(idx);
+
+    // Mini canvas showing fog pattern
+    const canvas = document.createElement('canvas');
+    const thumbW = 80, thumbH = 50;
+    canvas.width = thumbW;
+    canvas.height = thumbH;
+    const ctx = canvas.getContext('2d');
+
+    // Draw a mini representation of the fog
+    const len = (preset.w || mapWidth) * (preset.h || mapHeight);
+    let mask;
+    if (idx === activePresetIdx && fogMask) {
+      mask = fogMask;
+    } else if (preset.rle && preset.rle.length > 0) {
+      mask = rlDecode(preset.rle, len);
+    } else {
+      mask = new Uint8Array(len);
+    }
+
+    const pw = preset.w || mapWidth || 1;
+    const ph = preset.h || mapHeight || 1;
+    const imgData = ctx.createImageData(thumbW, thumbH);
+    const d = imgData.data;
+    for (let ty = 0; ty < thumbH; ty++) {
+      for (let tx = 0; tx < thumbW; tx++) {
+        const mx = Math.floor(tx / thumbW * pw);
+        const my = Math.floor(ty / thumbH * ph);
+        const mi = my * pw + mx;
+        const pi = (ty * thumbW + tx) * 4;
+        if (mi < mask.length && mask[mi] === 0) {
+          d[pi] = 0; d[pi+1] = 0; d[pi+2] = 0; d[pi+3] = 200;
+        } else {
+          d[pi] = 80; d[pi+1] = 130; d[pi+2] = 60; d[pi+3] = 120;
+        }
+      }
+    }
+    ctx.putImageData(imgData, 0, 0);
+    wrap.appendChild(canvas);
+
+    // Name label (double-click to rename)
+    const label = document.createElement('div');
+    label.className = 'preset-name';
+    label.textContent = preset.name || `Preset ${idx + 1}`;
+    label.ondblclick = (e) => {
+      e.stopPropagation();
+      const input = document.createElement('input');
+      input.value = preset.name || '';
+      input.style.cssText = 'width:100%;background:#222;color:#eee;border:1px solid #6a4;font-size:9px;padding:1px 4px;text-align:center;';
+      input.onblur = () => { renamePreset(idx, input.value || `Preset ${idx + 1}`); };
+      input.onkeydown = (ke) => { if (ke.key === 'Enter') input.blur(); };
+      label.replaceWith(input);
+      input.focus();
+      input.select();
+    };
+    wrap.appendChild(label);
+
+    // Delete button (hidden until hover, only if >1 preset)
+    if (fogPresets.length > 1) {
+      const del = document.createElement('button');
+      del.className = 'preset-delete';
+      del.textContent = '×';
+      del.title = 'Delete this preset';
+      del.onclick = (e) => { e.stopPropagation(); deletePreset(idx); };
+      wrap.appendChild(del);
+    }
+
+    container.appendChild(wrap);
+  });
+}
+
+function setTool(tool) {
+  currentTool = tool;
+  document.getElementById('btn-reveal').classList.toggle('active', tool === 'reveal');
+  document.getElementById('btn-hide').classList.toggle('active', tool === 'hide');
+  saveState();
+}
+
+function updateBrushPreview() {
+  const el = document.getElementById('brush-preview');
+  if (el) { const s = Math.max(8, Math.min(40, brushSize*0.6)); el.style.width=s+'px'; el.style.height=s+'px'; }
+}
+
+// === Sync to Active Display (map or show, depending on fogContext) ===
+function syncToMapDisplay() {
+  const ch = activeFogChannel();
+  if (!ch || !fogMask || !fogImage) return;
+  // If live sync is off, mark pending but don't push (only honored for projector)
+  if (fogContext === 'map' && !liveSync) {
+    markPendingSync();
+    return;
+  }
+  forceSyncToMapDisplay();
+}
+
+function forceSyncToMapDisplay() {
+  const ch = activeFogChannel();
+  if (!ch || !fogMask || !fogImage) return;
+  const crop = viewportCrop;
+  ch.postMessage({
+    type: 'fog-update',
+    imageSrc: fogImage.src,
+    fogMask: Array.from(fogMask),
+    width: mapWidth,
+    height: mapHeight,
+    crop: crop
+  });
+}
+
+// --- Live Sync toggle ---
+function toggleLiveSync() {
+  liveSync = !liveSync;
+  const btn = document.getElementById('btn-live-sync');
+  const syncBtn = document.getElementById('btn-sync-now');
+  btn.classList.toggle('active', liveSync);
+  btn.textContent = liveSync ? 'Live' : 'Staged';
+  syncBtn.style.display = liveSync ? 'none' : '';
+  if (liveSync && hasPendingSync) {
+    // Turning live back on — push everything now
+    syncNow();
+  }
+  saveState();
+}
+
+function syncNow() {
+  const ch = activeFogChannel();
+  if (!ch || !fogMask || !fogImage) return;
+  // Full sync: fog-init (in case map changed) + fog-update + projection
+  ch.postMessage({
+    type: 'fog-init',
+    imageSrc: fogImage.src,
+    width: mapWidth,
+    height: mapHeight
+  });
+  setTimeout(() => {
+    forceSyncToMapDisplay();
+    if (fogContext === 'map') sendProjectionSettings();
+    else sendShowSettings();
+  }, 100);
+  hasPendingSync = false;
+  const syncBtn = document.getElementById('btn-sync-now');
+  if (syncBtn) syncBtn.classList.remove('pending');
+  setStatus(fogContext === 'show' ? 'Synced to sidecar' : 'Synced to projector');
+}
+
+function markPendingSync() {
+  hasPendingSync = true;
+  const syncBtn = document.getElementById('btn-sync-now');
+  if (syncBtn) syncBtn.classList.add('pending');
+}
+
+// === Projection Settings (GM -> Projector only) ===
+// Keystone, scale, grid, and projector rotation. Sidecar gets its own minimal
+// settings via sendShowSettings — it doesn't need keystone/scale/grid.
+function sendProjectionSettings() {
+  if (!mapChannel) return;
+  mapChannel.postMessage({
+    type: 'projection',
+    corners: JSON.parse(JSON.stringify(corners)),
+    scale: projScale,
+    rotation: mapRotation,
+    background: mapBg,
+    gridEnabled, gridPx, gridOpacity,
+    gridColor: gridColorTemplate.replace('__A__', gridOpacity)
+  });
+}
+
+// Sidecar-specific settings: rotation + background.
+function sendShowSettings() {
+  if (!showChannel) return;
+  showChannel.postMessage({ type: 'show-settings', rotation: showRotation, background: showBg });
+}
+
+// === Background ===
+function setMapBg(color) {
+  mapBg = color || '#000000';
+  updateBgUI();
+  sendProjectionSettings();
+  saveState();
+}
+function setShowBg(color) {
+  showBg = color || '#000000';
+  updateBgUI();
+  sendShowSettings();
+  saveState();
+}
+function updateBgUI() {
+  const m = document.getElementById('map-bg-color');
+  const s = document.getElementById('show-bg-color');
+  if (m) m.value = mapBg;
+  if (s) s.value = showBg;
+}
+
+// === Rotation ===
+// Rotation is per-display: projector and sidecar rotate independently.
+function normalizeDeg(d) { return ((Math.round(+d) % 360) + 360) % 360; }
+
+function setMapRotation(deg) {
+  mapRotation = normalizeDeg(deg);
+  updateRotationUI();
+  if (currentMode === 'fog') {
+    computeViewportCrop();
+    updateViewportOutline();
+    sendCropUpdate();
+  }
+  sendProjectionSettings();
+  saveState();
+}
+
+function setShowRotation(deg) {
+  showRotation = normalizeDeg(deg);
+  updateRotationUI();
+  if (currentMode === 'image') {
+    computeViewportCrop();
+    updateViewportOutline();
+    sendCropUpdate();
+  }
+  sendShowSettings();
+  saveState();
+}
+
+function rotateMap(delta) { setMapRotation(mapRotation + delta); }
+function rotateShow(delta) { setShowRotation(showRotation + delta); }
+
+// Context-aware rotation (used by Q/E keyboard shortcuts).
+function rotateBy(delta) {
+  if (currentMode === 'image') rotateShow(delta);
+  else rotateMap(delta);
+}
+// Kept for backward-compat with any inline handlers; routes via currentMode.
+function setRotation(deg) {
+  if (currentMode === 'image') setShowRotation(deg);
+  else setMapRotation(deg);
+}
+function updateRotation(val) { setMapRotation(val); }
+
+function updateRotationUI() {
+  const slider = document.getElementById('rotation-slider');
+  const valEl = document.getElementById('rotation-val');
+  const valElImg = document.getElementById('rotation-val-img');
+  if (slider) slider.value = mapRotation;
+  if (valEl) valEl.textContent = mapRotation + '°';
+  if (valElImg) valElImg.textContent = showRotation + '°';
+}
+
+// 4-corner keystone
+function nudgeCorner(corner, axis, dir) {
+  const step = window.event && window.event.shiftKey ? 10 : 1;
+  corners[corner][axis] += dir * step;
+  document.getElementById('corner-' + corner + '-val').textContent =
+    corners[corner].x + ',' + corners[corner].y;
+  sendProjectionSettings();
+  saveState();
+}
+
+function resetCorner(corner) {
+  corners[corner] = { x: 0, y: 0 };
+  document.getElementById('corner-' + corner + '-val').textContent = '0,0';
+  sendProjectionSettings();
+  saveState();
+}
+
+// --- Joystick drag for keystone corners ---
+// Click and hold a drag pad, then move the mouse — 1px of cursor movement = 1px of corner offset.
+let dragCorner = null;
+let dragStartX = 0, dragStartY = 0;
+let dragStartCornerX = 0, dragStartCornerY = 0;
+
+function initCornerDrag() {
+  document.querySelectorAll('.corner-drag').forEach(pad => {
+    pad.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      dragCorner = pad.dataset.corner;
+      dragStartX = e.clientX;
+      dragStartY = e.clientY;
+      dragStartCornerX = corners[dragCorner].x;
+      dragStartCornerY = corners[dragCorner].y;
+      pad.classList.add('dragging');
+    });
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!dragCorner) return;
+    const dx = e.clientX - dragStartX;
+    const dy = e.clientY - dragStartY;
+    corners[dragCorner].x = dragStartCornerX + dx;
+    corners[dragCorner].y = dragStartCornerY + dy;
+    document.getElementById('corner-' + dragCorner + '-val').textContent =
+      corners[dragCorner].x + ',' + corners[dragCorner].y;
+    sendProjectionSettings();
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (dragCorner) {
+      const pad = document.querySelector(`.corner-drag[data-corner="${dragCorner}"]`);
+      if (pad) pad.classList.remove('dragging');
+      dragCorner = null;
+      saveState();
+    }
+  });
+}
+
+// --- Test pattern: solid white rectangle with 1" grid ---
+let testPatternActive = false;
+
+function toggleTestPattern() {
+  testPatternActive = !testPatternActive;
+  const btn = document.getElementById('btn-test-pattern');
+  if (btn) {
+    btn.classList.toggle('active', testPatternActive);
+    btn.textContent = testPatternActive ? 'Show Map (exit test)' : 'Test Pattern (white + grid)';
+  }
+  if (mapChannel) {
+    mapChannel.postMessage({ type: 'test-pattern', enabled: testPatternActive });
+  }
+  saveState();
+}
+
+function updateScale(val) {
+  projScale = parseInt(val);
+  document.getElementById('scale-val').textContent = projScale + '%';
+  sendProjectionSettings();
+  saveState();
+}
+function toggleGrid() {
+  gridEnabled = !gridEnabled;
+  document.getElementById('grid-status').textContent = gridEnabled ? 'ON' : 'OFF';
+  document.getElementById('btn-grid').classList.toggle('active', gridEnabled);
+  sendProjectionSettings();
+  saveState();
+}
+function updateGridSize(val) {
+  gridPx = parseInt(val);
+  document.getElementById('grid-px-val').textContent = gridPx + 'px';
+  sendProjectionSettings();
+  saveState();
+}
+function updateGridOpacity(val) {
+  gridOpacity = parseInt(val) / 100;
+  document.getElementById('grid-opacity-val').textContent = val + '%';
+  sendProjectionSettings();
+  saveState();
+}
+function setGridColor(template) {
+  gridColorTemplate = template;
+  sendProjectionSettings();
+  saveState();
+}
+function resetProjection() {
+  corners = { tl: {x:0,y:0}, tr: {x:0,y:0}, bl: {x:0,y:0}, br: {x:0,y:0} };
+  projScale = 100;
+  // Reset only the projector rotation here (this panel is the projector's controls).
+  // Sidecar rotation has its own reset button on the image page.
+  mapRotation = 0;
+  gridEnabled = false; gridPx = 50; gridOpacity = 0.4;
+  gridColorTemplate = 'rgba(255,255,255,__A__)';
+  document.getElementById('scale-slider').value = 100;
+  document.getElementById('grid-px-slider').value = 50;
+  document.getElementById('grid-opacity-slider').value = 40;
+  document.getElementById('scale-val').textContent = '100%';
+  document.getElementById('grid-px-val').textContent = '50px';
+  document.getElementById('grid-opacity-val').textContent = '40%';
+  document.getElementById('grid-status').textContent = 'OFF';
+  document.getElementById('btn-grid').classList.remove('active');
+  updateRotationUI();
+  ['tl','tr','bl','br'].forEach(c =>
+    document.getElementById('corner-' + c + '-val').textContent = '0,0');
+  // Turn off test pattern if active
+  if (testPatternActive) toggleTestPattern();
+  // Recompute crop after rotation reset
+  computeViewportCrop();
+  updateViewportOutline();
+  sendCropUpdate();
+  sendProjectionSettings();
+  saveState();
+}
+
+// === Crop Sliders (controls what the projector shows) ===
+function toggleCropPanel() {
+  const p = document.getElementById('crop-panel');
+  const isHidden = !p.style.display || p.style.display === 'none';
+  p.style.display = isHidden ? 'block' : 'none';
+  const isOpen = p.style.display === 'block';
+  const btnFog = document.getElementById('btn-crop');
+  const btnImg = document.getElementById('btn-crop-img');
+  if (btnFog) btnFog.classList.toggle('active', isOpen);
+  if (btnImg) btnImg.classList.toggle('active', isOpen);
+  if (isOpen) {
+    document.getElementById('text-overlay-panel').style.display = 'none';
+    document.getElementById('projection-panel').style.display = 'none';
+  }
+}
+
+function cropFit() {
+  // Show the entire map — zoom 1x (default). Black bars fill gaps.
+  cropZoom = 1; cropHPos = 0.5; cropVPos = 0.5;
+  applyCropToSliders();
+  highlightCropButton('fit');
+  saveState();
+}
+
+function cropFill() {
+  // Zoom so the map fills the screen completely (no black bars).
+  // Fill = largest screen-ratio rect that fits inside the map.
+  if (!mapWidth || !mapHeight) return;
+  const targetIsShow = (currentMode === 'image') ||
+                       (currentMode === 'fog' && fogContext === 'show');
+  const baseScrW = targetIsShow ? sidecarW : projectorW;
+  const baseScrH = targetIsShow ? sidecarH : projectorH;
+  const activeRotation = targetIsShow ? showRotation : mapRotation;
+  const isRotated90 = (activeRotation === 90 || activeRotation === 270);
+  const scrW = isRotated90 ? baseScrH : baseScrW;
+  const scrH = isRotated90 ? baseScrW : baseScrH;
+  const screenAspect = scrW / scrH;
+  const mapAspect = mapWidth / mapHeight;
+
+  // Fill dimensions: largest screen-ratio rect inside the map
+  let fillW, fillH;
+  if (screenAspect > mapAspect) {
+    fillW = mapWidth;
+    fillH = mapWidth / screenAspect;
+  } else {
+    fillH = mapHeight;
+    fillW = mapHeight * screenAspect;
+  }
+
+  // Solve for cropZoom: baseW / cropZoom = fillW
+  // baseW = sqrt(mapW * mapH * screenAspect)
+  const baseW = Math.sqrt(mapWidth * mapHeight * screenAspect);
+  cropZoom = baseW / fillW;
+
+  cropHPos = 0.5; cropVPos = 0.5;
+  applyCropToSliders();
+  highlightCropButton('fill');
+  saveState();
+}
+
+function applyCropToSliders() {
+  const zoomPct = Math.round(cropZoom * 100);
+  document.getElementById('crop-zoom').value = Math.max(10, Math.min(1000, zoomPct));
+  document.getElementById('crop-hpos').value = Math.round(cropHPos * 100);
+  document.getElementById('crop-vpos').value = Math.round(cropVPos * 100);
+  document.getElementById('crop-zoom-val').textContent = cropZoom.toFixed(1) + 'x';
+  document.getElementById('crop-hpos-val').textContent = Math.round(cropHPos * 100) + '%';
+  document.getElementById('crop-vpos-val').textContent = Math.round(cropVPos * 100) + '%';
+  computeViewportCrop();
+  updateViewportOutline();
+  sendCropUpdate();
+}
+
+function highlightCropButton(which) {
+  const fit = document.getElementById('btn-crop-fit');
+  const fill = document.getElementById('btn-crop-fill');
+  if (fit) { fit.style.background = which === 'fit' ? '#335' : '#444'; }
+  if (fill) { fill.style.background = which === 'fill' ? '#335' : '#444'; }
+}
+
+function updateCrop() {
+  cropZoom = parseInt(document.getElementById('crop-zoom').value) / 100;
+  cropHPos = parseInt(document.getElementById('crop-hpos').value) / 100;
+  cropVPos = parseInt(document.getElementById('crop-vpos').value) / 100;
+
+  document.getElementById('crop-zoom-val').textContent = cropZoom.toFixed(1) + 'x';
+  document.getElementById('crop-hpos-val').textContent = Math.round(cropHPos * 100) + '%';
+  document.getElementById('crop-vpos-val').textContent = Math.round(cropVPos * 100) + '%';
+
+  computeViewportCrop();
+  updateViewportOutline();
+  // Send lightweight crop-only update (no fog mask re-send)
+  sendCropUpdate();
+  saveState();
+}
+
+function sendCropUpdate() {
+  // Route the crop update to whichever display the GM is currently editing.
+  if (currentMode === 'fog') {
+    const ch = activeFogChannel();
+    if (!ch) return;
+    if (fogContext === 'map' && !liveSync) {
+      markPendingSync();
+      return;
+    }
+    ch.postMessage({ type: 'crop-update', crop: viewportCrop });
+  } else if (currentMode === 'image' && showChannel) {
+    showChannel.postMessage({ type: 'crop-update', crop: viewportCrop });
+  }
+}
+
+function computeViewportCrop() {
+  if (!mapWidth || !mapHeight) { viewportCrop = null; return; }
+
+  // In fog mode, zoom <= 1 means "show everything" (no crop needed).
+  // In image mode, zoom < 1 means "make image smaller than screen" — we DO need a crop rect.
+  if (currentMode === 'fog' && cropZoom <= 1.01) {
+    viewportCrop = null;
+    return;
+  }
+  if (currentMode === 'image' && Math.abs(cropZoom - 1.0) < 0.01 && Math.abs(cropHPos - 0.5) < 0.01 && Math.abs(cropVPos - 0.5) < 0.01) {
+    viewportCrop = null;
+    return;
+  }
+
+  // Viewport matches the target screen's aspect ratio.
+  // Target display: image mode AND show-fog mode both target the sidecar.
+  const targetIsShow = (currentMode === 'image') ||
+                       (currentMode === 'fog' && fogContext === 'show');
+  const baseScrW = targetIsShow ? sidecarW : projectorW;
+  const baseScrH = targetIsShow ? sidecarH : projectorH;
+  const activeRotation = targetIsShow ? showRotation : mapRotation;
+  const isRotated90 = (activeRotation === 90 || activeRotation === 270);
+  const scrW = isRotated90 ? baseScrH : baseScrW;
+  const scrH = isRotated90 ? baseScrW : baseScrH;
+  const screenAspect = scrW / scrH;
+
+  // Base dimensions at zoom=1 (derived from area formula)
+  const baseW = Math.sqrt(mapWidth * mapHeight * screenAspect);
+  const baseH = Math.sqrt(mapWidth * mapHeight / screenAspect);
+
+  let w = baseW / cropZoom;
+  let h = baseH / cropZoom;
+
+  // For zoom-in (fog mode): clamp viewport to map bounds
+  // For zoom-out (image mode): allow viewport larger than map (image shrinks)
+  if (currentMode === 'fog') {
+    if (w > mapWidth)  { w = mapWidth;  h = w / screenAspect; }
+    if (h > mapHeight) { h = mapHeight; w = h * screenAspect; }
+  }
+
+  w = Math.max(1, Math.floor(w));
+  h = Math.max(1, Math.floor(h));
+
+  // Position: allow panning past map edges so any area can be centered.
+  // At 50% = centered on map. 0%/100% = viewport extends half its size
+  // past the map edge, so edge content can be centered on screen.
+  // Range: x from -(w/2) to (mapWidth - w/2)
+  const rangeX = mapWidth;
+  const rangeY = mapHeight;
+  let x = Math.floor(cropHPos * rangeX - w / 2);
+  let y = Math.floor(cropVPos * rangeY - h / 2);
+
+  // Snap-to-edge: if within 15px of a clean alignment, snap to it
+  const snap = 15;
+  // Snap: left edge of map at left edge of viewport (x=0)
+  if (Math.abs(x) < snap) x = 0;
+  // Snap: right edge of map at right edge of viewport
+  if (Math.abs(x - (mapWidth - w)) < snap) x = mapWidth - w;
+  // Snap: top edge
+  if (Math.abs(y) < snap) y = 0;
+  // Snap: bottom edge
+  if (Math.abs(y - (mapHeight - h)) < snap) y = mapHeight - h;
+  // Snap: centered
+  const cx = Math.floor((mapWidth - w) / 2);
+  const cy = Math.floor((mapHeight - h) / 2);
+  if (Math.abs(x - cx) < snap) x = cx;
+  if (Math.abs(y - cy) < snap) y = cy;
+
+  viewportCrop = { x, y, w, h };
+}
+
+function resetCrop() {
+  cropZoom = 1; cropHPos = 0.5; cropVPos = 0.5;
+  const z = document.getElementById('crop-zoom');
+  const hp = document.getElementById('crop-hpos');
+  const vp = document.getElementById('crop-vpos');
+  if (z) z.value = 100;
+  if (hp) hp.value = 50;
+  if (vp) vp.value = 50;
+  const zv = document.getElementById('crop-zoom-val');
+  const hv = document.getElementById('crop-hpos-val');
+  const vv = document.getElementById('crop-vpos-val');
+  if (zv) zv.textContent = '1.0x';
+  if (hv) hv.textContent = '50%';
+  if (vv) vv.textContent = '50%';
+  viewportCrop = null;
+  updateViewportOutline();
+  sendCropUpdate();
+  setStatus('Crop reset — projector shows full map');
+}
+
+function updateViewportOutline() {
+  // Fog mode outline (positioned in map pixel coordinates inside canvas container)
+  const outline = document.getElementById('viewport-outline');
+  if (outline) {
+    if (!viewportCrop) {
+      outline.style.display = 'none';
+    } else {
+      outline.style.display = 'block';
+      outline.style.left = viewportCrop.x + 'px';
+      outline.style.top = viewportCrop.y + 'px';
+      outline.style.width = viewportCrop.w + 'px';
+      outline.style.height = viewportCrop.h + 'px';
+    }
+  }
+
+  // Image mode outline (positioned as percentages over the preview image)
+  const imgOutline = document.getElementById('image-viewport-outline');
+  if (imgOutline) {
+    if (!viewportCrop || !mapWidth || !mapHeight) {
+      imgOutline.style.display = 'none';
+    } else {
+      imgOutline.style.display = 'block';
+      // Convert map-pixel crop rect to percentage of image dimensions
+      imgOutline.style.left = (viewportCrop.x / mapWidth * 100) + '%';
+      imgOutline.style.top = (viewportCrop.y / mapHeight * 100) + '%';
+      imgOutline.style.width = (viewportCrop.w / mapWidth * 100) + '%';
+      imgOutline.style.height = (viewportCrop.h / mapHeight * 100) + '%';
+    }
+  }
+}
+
+// === Text Overlay ===
+function closeCropPanel() {
+  document.getElementById('crop-panel').style.display = 'none';
+  const btnFog = document.getElementById('btn-crop');
+  const btnImg = document.getElementById('btn-crop-img');
+  if (btnFog) btnFog.classList.remove('active');
+  if (btnImg) btnImg.classList.remove('active');
+}
+function toggleTextPanel() {
+  const p = document.getElementById('text-overlay-panel');
+  const isHidden = !p.style.display || p.style.display === 'none';
+  p.style.display = isHidden ? 'block' : 'none';
+  if (isHidden) {
+    document.getElementById('projection-panel').style.display = 'none';
+    closeCropPanel();
+  }
+}
+function toggleProjectionPanel() {
+  const p = document.getElementById('projection-panel');
+  const isHidden = !p.style.display || p.style.display === 'none';
+  p.style.display = isHidden ? 'block' : 'none';
+  if (isHidden) {
+    document.getElementById('text-overlay-panel').style.display = 'none';
+    closeCropPanel();
+  }
+}
+function showTextOnPlayer() {
+  const text = document.getElementById('text-input').value.trim();
+  if (text && mapChannel) mapChannel.postMessage({ type: 'show-text', text });
+}
+function hideTextOnPlayer() {
+  if (mapChannel) mapChannel.postMessage({ type: 'hide-text' });
+}
+
+// === Navigation ===
+function goHome() {
+  // Save current fog state before navigating away (per active context)
+  if (currentMode === 'fog' && fogInitialized && fogImage) {
+    savePerMapFog(fogImage.src);
+  }
+  document.getElementById('fog-gm').style.display = 'none';
+  document.getElementById('image-display').style.display = 'none';
+  document.getElementById('text-overlay-panel').style.display = 'none';
+  document.getElementById('projection-panel').style.display = 'none';
+  document.getElementById('crop-panel').style.display = 'none';
+  document.getElementById('landing').style.display = 'flex';
+  document.getElementById('mode-buttons').style.display = loadedImage ? 'flex' : 'none';
+  const btnFog = document.getElementById('btn-crop');
+  const btnImg = document.getElementById('btn-crop-img');
+  if (btnFog) btnFog.classList.remove('active');
+  if (btnImg) btnImg.classList.remove('active');
+  currentMode = 'landing';
+  renderMapLibrary();
+  saveState();
+}
+
+function goBack() { goHome(); }
+
+
+// ============================================================
+// === PLAYER VIEW (runs in display windows) ==================
+// ============================================================
+function setupPlayerChannel() {
+  const channelName = playerDisplay === 'map' ? 'gm-display-map' : 'gm-display-show';
+  playerChannel = new BroadcastChannel(channelName);
+
+  // Send full request-sync (with current screen dimensions) on initial load.
+  setTimeout(() => playerChannel.postMessage({
+    type: 'request-sync',
+    screenW: window.innerWidth,
+    screenH: window.innerHeight
+  }), 500);
+
+  // Heartbeat carries the player's current viewport dimensions so the GM can
+  // pick them up even if it (re)loaded after the player did. The GM applies
+  // hysteresis so harmless layout transients don't cause flicker.
+  setInterval(() => playerChannel.postMessage({
+    type: 'heartbeat',
+    screenW: window.innerWidth,
+    screenH: window.innerHeight
+  }), 2000);
+
+  playerChannel.onmessage = (e) => {
+    const d = e.data;
+    if (d.type === 'heartbeat') return;
+
+    // --- Image display (sidecar, no fog) ---
+    if (d.type === 'show-image') {
+      document.getElementById('player-text-overlay').style.display = 'none';
+      // Plain image: clear any cached fog so a stale fog mask doesn't sneak back
+      // in via a subsequent crop-update.
+      cachedFogData = null;
+      cachedMapSrc = d.imageSrc;
+      const tempImg = new Image();
+      tempImg.onload = () => {
+        cachedMapImage = tempImg;
+        renderPlayerImage(tempImg, d.crop);
+      };
+      tempImg.src = d.imageSrc;
+    }
+
+    // --- Fog of war (projector) ---
+    if (d.type === 'fog-init') {
+      document.getElementById('player-image').style.display = 'none';
+      const wrap = document.getElementById('player-canvas-wrap');
+      wrap.style.display = 'inline-block';
+      const canvas = document.getElementById('player-canvas');
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      // Pre-cache the map image
+      cachedMapSrc = d.imageSrc;
+      cachedMapImage = new Image();
+      cachedMapImage.src = d.imageSrc;
+    }
+
+    if (d.type === 'fog-update') {
+      console.log('[Player] fog-update received. Map:', d.width, 'x', d.height,
+        'fog entries:', d.fogMask?.length, 'crop:', JSON.stringify(d.crop));
+      document.getElementById('player-image').style.display = 'none';
+      const wrap = document.getElementById('player-canvas-wrap');
+      wrap.style.display = 'inline-block';
+      // Cache the fog data so crop-only updates can re-render without re-sending mask
+      cachedFogData = d;
+      renderPlayerFogDoubleBuffered(d);
+    }
+
+    // --- Crop-only update (lightweight, no fog mask) ---
+    if (d.type === 'crop-update') {
+      console.log('[Player] crop-update received:', JSON.stringify(d.crop),
+        'cachedFogData:', !!cachedFogData, 'cachedMapImage:', !!cachedMapImage);
+      if (cachedFogData) {
+        // Fog-of-war mode: re-render with new crop
+        cachedFogData.crop = d.crop;
+        renderPlayerFogDoubleBuffered(cachedFogData);
+      } else if (cachedMapImage && cachedMapImage.complete) {
+        // Image mode: re-render with new crop
+        renderPlayerImage(cachedMapImage, d.crop);
+      } else {
+        console.warn('[Player] crop-update ignored — no cached data. Player needs a full sync.');
+        playerChannel.postMessage({ type: 'request-sync' });
+      }
+    }
+
+    // --- Sidecar settings (rotation + background — sidecar doesn't get keystone/scale/grid) ---
+    if (d.type === 'show-settings') {
+      const prevRotation = pRotation;
+      pRotation = ((Math.round(d.rotation || 0) % 360) + 360) % 360;
+      if (typeof d.background === 'string') pBg = d.background;
+      const rotationChanged = (prevRotation !== pRotation);
+      if (rotationChanged) {
+        if (cachedFogData) {
+          // Sidecar has fog active — re-render image+fog
+          renderPlayerFogDoubleBuffered(cachedFogData);
+        } else if (cachedMapImage && cachedMapImage.complete) {
+          // Plain image
+          renderPlayerImage(cachedMapImage, null);
+        }
+      }
+      applyProjectionTransform();
+      applyPlayerBackground();
+    }
+
+    // --- Projection settings (4-corner keystone, rotation, scale, grid, background) ---
+    if (d.type === 'projection') {
+      const prevRotation = pRotation;
+      pCorners = d.corners || { tl:{x:0,y:0}, tr:{x:0,y:0}, bl:{x:0,y:0}, br:{x:0,y:0} };
+      pScale = d.scale || 100;
+      pRotation = ((Math.round(d.rotation || 0) % 360) + 360) % 360;
+      if (typeof d.background === 'string') pBg = d.background;
+      pGridEnabled = d.gridEnabled || false;
+      pGridPx = d.gridPx || 50;
+      pGridOpacity = d.gridOpacity || 0.4;
+      pGridColor = d.gridColor || 'rgba(255,255,255,0.4)';
+      applyPlayerBackground();
+
+      // If rotation crosses the 0/180 ↔ 90/270 boundary, canvas dimensions need
+      // to swap, so re-render before applying the transform (which depends on
+      // canvas.width/height for the keystone matrix3d).
+      const rotationChanged = (prevRotation !== pRotation);
+      if (pTestPattern) {
+        renderTestPattern();
+      } else if (rotationChanged) {
+        if (cachedFogData) {
+          renderPlayerFogDoubleBuffered(cachedFogData);
+        } else if (cachedMapImage && cachedMapImage.complete) {
+          // Re-render the image; reuse last crop if any
+          renderPlayerImage(cachedMapImage, (cachedFogData && cachedFogData.crop) || null);
+        }
+      }
+      applyProjectionTransform();
+      drawGrid();
+    }
+
+    // --- Text overlay ---
+    if (d.type === 'show-text') {
+      const ov = document.getElementById('player-text-overlay');
+      ov.textContent = d.text;
+      ov.style.display = 'block';
+    }
+    if (d.type === 'hide-text') {
+      document.getElementById('player-text-overlay').style.display = 'none';
+    }
+
+    // --- Test pattern (white + grid for keystone calibration) ---
+    if (d.type === 'test-pattern') {
+      pTestPattern = d.enabled;
+      if (d.enabled) {
+        renderTestPattern();
+      } else {
+        // Re-render normal content
+        if (cachedFogData) {
+          renderPlayerFogDoubleBuffered(cachedFogData);
+        } else if (cachedMapImage && cachedMapImage.complete) {
+          renderPlayerImage(cachedMapImage, null);
+        }
+      }
+    }
+
+    if (d.type === 'clear') {
+      document.getElementById('player-image').style.display = 'none';
+      document.getElementById('player-canvas-wrap').style.display = 'none';
+      document.getElementById('player-text-overlay').style.display = 'none';
+    }
+  };
+}
+
+// Apply the player's per-display background color.
+function applyPlayerBackground() {
+  if (!isPlayerView) return;
+  const view = document.getElementById('player-view');
+  if (view) view.style.background = pBg;
+  document.body.style.background = pBg;
+}
+
+// === Test Pattern: solid white with 1" black grid ===
+function renderTestPattern() {
+  const canvas = document.getElementById('player-canvas');
+  const wrap = document.getElementById('player-canvas-wrap');
+  const playerImg = document.getElementById('player-image');
+
+  playerImg.style.display = 'none';
+  wrap.style.display = 'inline-block';
+
+  const wW = window.innerWidth, wH = window.innerHeight;
+  canvas.width = wW;
+  canvas.height = wH;
+
+  const ctx = canvas.getContext('2d');
+  // Solid white background
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, wW, wH);
+
+  // Use grid spacing from projection settings (user-adjustable for their projection size)
+  const gridPx = pGridPx || 40;
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let x = 0; x <= wW; x += gridPx) {
+    ctx.moveTo(x + 0.5, 0);
+    ctx.lineTo(x + 0.5, wH);
+  }
+  for (let y = 0; y <= wH; y += gridPx) {
+    ctx.moveTo(0, y + 0.5);
+    ctx.lineTo(wW, y + 0.5);
+  }
+  ctx.stroke();
+
+  // Corner markers — draw red circles at each corner for visual reference
+  ctx.fillStyle = '#f00';
+  const m = 20; // margin from edge
+  [[m, m], [wW - m, m], [m, wH - m], [wW - m, wH - m]].forEach(([cx, cy]) => {
+    ctx.beginPath();
+    ctx.arc(cx, cy, 8, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  // Center crosshair
+  ctx.strokeStyle = '#f00';
+  ctx.lineWidth = 2;
+  const cx = wW / 2, cy = wH / 2;
+  ctx.beginPath();
+  ctx.moveTo(cx - 30, cy); ctx.lineTo(cx + 30, cy);
+  ctx.moveTo(cx, cy - 30); ctx.lineTo(cx, cy + 30);
+  ctx.stroke();
+
+  // Apply projection transform (keystone still affects test pattern)
+  applyProjectionTransform();
+}
+
+// === Crop overlap helper (handles out-of-bounds crop positions) ===
+// Given a crop rect {x,y,w,h} that may extend past the source image,
+// returns the visible overlap: source rect and destination offset.
+// Returns null if there's no overlap at all.
+function computeCropOverlap(crop, imgW, imgH) {
+  const cx = crop.x, cy = crop.y, cw = crop.w, ch = crop.h;
+
+  // Intersection of crop rect with image bounds
+  const left   = Math.max(0, cx);
+  const top    = Math.max(0, cy);
+  const right  = Math.min(imgW, cx + cw);
+  const bottom = Math.min(imgH, cy + ch);
+
+  const srcW = right - left;
+  const srcH = bottom - top;
+  if (srcW <= 0 || srcH <= 0) return null;
+
+  return {
+    srcX: left,             // source image x
+    srcY: top,              // source image y
+    srcW: srcW,             // source width
+    srcH: srcH,             // source height
+    dstX: left - cx,        // destination x offset within the crop viewport
+    dstY: top - cy          // destination y offset within the crop viewport
+  };
+}
+
+// === Image rendering (sidecar, supports crop with overshoot) ===
+function renderPlayerImage(img, crop) {
+  const playerImg = document.getElementById('player-image');
+  const wrap = document.getElementById('player-canvas-wrap');
+  const canvas = document.getElementById('player-canvas');
+
+  if (!crop) {
+    // No crop — just show the image as-is
+    wrap.style.display = 'none';
+    playerImg.style.display = 'block';
+    playerImg.src = img.src;
+    return;
+  }
+
+  // Crop mode — render to canvas (handles out-of-bounds crop positions)
+  playerImg.style.display = 'none';
+  wrap.style.display = 'inline-block';
+
+  const wW = window.innerWidth, wH = window.innerHeight;
+  // For 90°/270° rotation, render at swapped dimensions so post-rotation fits screen
+  const isRot90 = (pRotation === 90 || pRotation === 270);
+  const targetW = isRot90 ? wH : wW;
+  const targetH = isRot90 ? wW : wH;
+  const scale = Math.min(targetW / crop.w, targetH / crop.h);
+  const cW = Math.floor(crop.w * scale);
+  const cH = Math.floor(crop.h * scale);
+
+  canvas.width = cW;
+  canvas.height = cH;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, cW, cH);
+
+  // Compute overlap between crop rect and image bounds
+  const ol = computeCropOverlap(crop, img.width, img.height);
+  if (ol) {
+    // Draw the visible portion at the correct canvas offset
+    ctx.drawImage(img,
+      ol.srcX, ol.srcY, ol.srcW, ol.srcH,
+      ol.dstX * scale, ol.dstY * scale, ol.srcW * scale, ol.srcH * scale);
+  }
+}
+
+// === Double-buffered fog rendering (no flicker!) ===
+function renderPlayerFogDoubleBuffered(data) {
+  const canvas = document.getElementById('player-canvas');
+  const wW = window.innerWidth, wH = window.innerHeight;
+  // For 90°/270° rotation, the canvas is rotated by CSS to fill the screen,
+  // so we render it at swapped target dimensions.
+  const isRot90 = (pRotation === 90 || pRotation === 270);
+  const targetW = isRot90 ? wH : wW;
+  const targetH = isRot90 ? wW : wH;
+
+  // Determine source region: cropped viewport or full map
+  const crop = data.crop; // {x, y, w, h} in map pixels, or null/undefined
+  const srcW = crop ? crop.w : data.width;
+  const srcH = crop ? crop.h : data.height;
+  const srcX = crop ? crop.x : 0;
+  const srcY = crop ? crop.y : 0;
+
+  // Scale the source region to fit the (possibly rotated) projector screen
+  const scale = Math.min(targetW / srcW, targetH / srcH);
+  const cW = Math.floor(srcW * scale);
+  const cH = Math.floor(srcH * scale);
+
+  // Create or resize offscreen buffer
+  if (!offscreenCanvas || offscreenCanvas.width !== cW || offscreenCanvas.height !== cH) {
+    offscreenCanvas = document.createElement('canvas');
+    offscreenCanvas.width = cW;
+    offscreenCanvas.height = cH;
+    offscreenCtx = offscreenCanvas.getContext('2d');
+  }
+
+  const doRender = (img) => {
+    const ctx = offscreenCtx;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, cW, cH);
+
+    // Draw the cropped region — handles out-of-bounds crop positions
+    const ol = crop ? computeCropOverlap(crop, data.width, data.height) : null;
+    if (crop && ol) {
+      ctx.drawImage(img,
+        ol.srcX, ol.srcY, ol.srcW, ol.srcH,
+        ol.dstX * scale, ol.dstY * scale, ol.srcW * scale, ol.srcH * scale);
+    } else if (!crop) {
+      ctx.drawImage(img, 0, 0, data.width, data.height, 0, 0, cW, cH);
+    }
+
+    // Apply fog mask (offset into the mask by crop position)
+    const imgData = ctx.getImageData(0, 0, cW, cH);
+    const px = imgData.data;
+    const mask = data.fogMask;
+    for (let y = 0; y < cH; y++) {
+      for (let x = 0; x < cW; x++) {
+        // Map back to mask coordinates
+        const mapX = srcX + Math.floor(x / scale);
+        const mapY = srcY + Math.floor(y / scale);
+        if (mapX < 0 || mapX >= data.width || mapY < 0 || mapY >= data.height) {
+          // Out of bounds = black (already black from fillRect)
+          const i = (y * cW + x) * 4;
+          px[i] = 0; px[i+1] = 0; px[i+2] = 0; px[i+3] = 255;
+        } else if (mask[mapY * data.width + mapX] === 0) {
+          const i = (y * cW + x) * 4;
+          px[i] = 0; px[i+1] = 0; px[i+2] = 0; px[i+3] = 255;
+        }
+      }
+    }
+    ctx.putImageData(imgData, 0, 0);
+
+    // === SWAP: single, atomic draw to visible canvas ===
+    canvas.width = cW;
+    canvas.height = cH;
+    const visCtx = canvas.getContext('2d');
+    visCtx.drawImage(offscreenCanvas, 0, 0);
+
+    // Redraw grid on top
+    drawGrid();
+  };
+
+  if (cachedMapImage && cachedMapImage.complete && cachedMapSrc === data.imageSrc) {
+    doRender(cachedMapImage);
+  } else {
+    cachedMapSrc = data.imageSrc;
+    cachedMapImage = new Image();
+    cachedMapImage.onload = () => doRender(cachedMapImage);
+    cachedMapImage.src = data.imageSrc;
+  }
+}
+
+// === 4-Corner Perspective Transform ===
+// Computes a CSS matrix3d from 4 corner offsets to warp the projection.
+// Rotation is applied separately on #player-rotation-wrap (rotates around center),
+// so it composes cleanly with keystone (which uses transform-origin 0,0).
+// Also applies rotation to #player-image (used in sidecar mode without crop).
+function applyProjectionTransform() {
+  const wrap = document.getElementById('player-canvas-wrap');
+  const rotWrap = document.getElementById('player-rotation-wrap');
+  const playerImg = document.getElementById('player-image');
+  if (!wrap) return;
+
+  // Apply rotation to the outer rotation wrap (rotates around its center).
+  if (rotWrap) {
+    rotWrap.style.transformOrigin = 'center center';
+    rotWrap.style.transform = pRotation ? `rotate(${pRotation}deg)` : 'none';
+  }
+  // The <img> in sidecar-no-crop mode is positioned at the viewport level and rotated
+  // independently. For 90°/270°, clamp its max-width/height to swapped viewport dims so
+  // the rotated image fills the screen instead of overflowing or under-filling.
+  if (playerImg) {
+    playerImg.style.transformOrigin = 'center center';
+    playerImg.style.transform = pRotation ? `rotate(${pRotation}deg)` : '';
+    if (pRotation === 90 || pRotation === 270) {
+      playerImg.style.maxWidth = window.innerHeight + 'px';
+      playerImg.style.maxHeight = window.innerWidth + 'px';
+    } else {
+      playerImg.style.maxWidth = '';
+      playerImg.style.maxHeight = '';
+    }
+  }
+
+  const canvas = document.getElementById('player-canvas');
+  if (!canvas) return;
+  const w = canvas.width || canvas.clientWidth || 800;
+  const h = canvas.height || canvas.clientHeight || 600;
+
+  const c = pCorners;
+  const hasKeystone = c.tl.x || c.tl.y || c.tr.x || c.tr.y ||
+                      c.bl.x || c.bl.y || c.br.x || c.br.y;
+
+  if (!hasKeystone && pScale === 100) {
+    wrap.style.transform = 'none';
+    return;
+  }
+
+  let transform = '';
+  if (pScale !== 100) transform += `scale(${pScale / 100}) `;
+
+  if (hasKeystone) {
+    // Source corners (original rectangle)
+    const src = [[0, 0], [w, 0], [0, h], [w, h]];
+    // Destination corners (adjusted by offsets)
+    const dst = [
+      [c.tl.x, c.tl.y],
+      [w + c.tr.x, c.tr.y],
+      [c.bl.x, h + c.bl.y],
+      [w + c.br.x, h + c.br.y]
+    ];
+    const matrix = computeMatrix3d(src, dst);
+    if (matrix) transform += `matrix3d(${matrix})`;
+  }
+
+  wrap.style.transformOrigin = '0 0';
+  wrap.style.transform = transform.trim() || 'none';
+}
+
+// Compute CSS matrix3d from 4 source→destination point pairs
+// Uses general projective (homography) transform
+function computeMatrix3d(src, dst) {
+  // src/dst: [[x0,y0], [x1,y1], [x2,y2], [x3,y3]]
+  // Solve for 3x3 projective matrix H where H * src_i = dst_i (homogeneous)
+  // Then embed in 4x4 for CSS matrix3d
+
+  const s = src, d = dst;
+
+  // Build 8x8 system: for each point pair, 2 equations
+  // x'*(h31*x + h32*y + h33) = h11*x + h12*y + h13
+  // y'*(h31*x + h32*y + h33) = h21*x + h22*y + h23
+  // Rewrite as Ah = 0 where h = [h11..h33] (h33=1)
+  // Actually solve as 8x8 linear system with h33=1
+
+  const A = [];
+  const b = [];
+  for (let i = 0; i < 4; i++) {
+    const sx = s[i][0], sy = s[i][1];
+    const dx = d[i][0], dy = d[i][1];
+    A.push([sx, sy, 1, 0, 0, 0, -dx*sx, -dx*sy]);
+    b.push(dx);
+    A.push([0, 0, 0, sx, sy, 1, -dy*sx, -dy*sy]);
+    b.push(dy);
+  }
+
+  // Solve via Gaussian elimination
+  const n = 8;
+  const M = A.map((row, i) => [...row, b[i]]);
+
+  for (let col = 0; col < n; col++) {
+    // Partial pivoting
+    let maxRow = col;
+    for (let row = col + 1; row < n; row++) {
+      if (Math.abs(M[row][col]) > Math.abs(M[maxRow][col])) maxRow = row;
+    }
+    [M[col], M[maxRow]] = [M[maxRow], M[col]];
+
+    if (Math.abs(M[col][col]) < 1e-10) return null; // singular
+
+    for (let row = col + 1; row < n; row++) {
+      const f = M[row][col] / M[col][col];
+      for (let j = col; j <= n; j++) M[row][j] -= f * M[col][j];
+    }
+  }
+
+  // Back substitution
+  const h = new Array(n);
+  for (let i = n - 1; i >= 0; i--) {
+    h[i] = M[i][n];
+    for (let j = i + 1; j < n; j++) h[i] -= M[i][j] * h[j];
+    h[i] /= M[i][i];
+  }
+
+  // h = [h11, h12, h13, h21, h22, h23, h31, h32], h33 = 1
+  // 3x3 matrix H:
+  // h[0] h[1] h[2]
+  // h[3] h[4] h[5]
+  // h[6] h[7] 1
+
+  // CSS matrix3d is column-major 4x4:
+  // a1 a2 a3 a4     col1: x
+  // b1 b2 b3 b4     col2: y
+  // c1 c2 c3 c4     col3: z
+  // d1 d2 d3 d4     col4: w
+  //
+  // For 2D projective transform, embed 3x3 into 4x4:
+  // H11 H21 0 H31
+  // H12 H22 0 H32
+  // 0   0   1 0
+  // H13 H23 0 H33
+
+  return [
+    h[0], h[3], 0, h[6],
+    h[1], h[4], 0, h[7],
+    0,    0,    1, 0,
+    h[2], h[5], 0, 1
+  ].join(',');
+}
+
+// === Grid Overlay ===
+function drawGrid() {
+  const gridCanvas = document.getElementById('player-grid-canvas');
+  if (!gridCanvas) return;
+  const mapCanvas = document.getElementById('player-canvas');
+  if (!mapCanvas) return;
+
+  // Match grid canvas to map canvas size
+  gridCanvas.width = mapCanvas.width;
+  gridCanvas.height = mapCanvas.height;
+  gridCanvas.style.width = mapCanvas.style.width || mapCanvas.width + 'px';
+  gridCanvas.style.height = mapCanvas.style.height || mapCanvas.height + 'px';
+
+  const ctx = gridCanvas.getContext('2d');
+  ctx.clearRect(0, 0, gridCanvas.width, gridCanvas.height);
+
+  if (!pGridEnabled || pGridPx < 5) return;
+
+  ctx.strokeStyle = pGridColor;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+
+  // Vertical lines
+  for (let x = pGridPx; x < gridCanvas.width; x += pGridPx) {
+    ctx.moveTo(x + 0.5, 0);
+    ctx.lineTo(x + 0.5, gridCanvas.height);
+  }
+  // Horizontal lines
+  for (let y = pGridPx; y < gridCanvas.height; y += pGridPx) {
+    ctx.moveTo(0, y + 0.5);
+    ctx.lineTo(gridCanvas.width, y + 0.5);
+  }
+
+  ctx.stroke();
+}
+
+// === Keyboard Shortcuts ===
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
+  // Undo/Redo: Cmd+Z / Cmd+Shift+Z (Mac) or Ctrl+Z / Ctrl+Shift+Z
+  if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey && currentMode === 'fog') {
+    e.preventDefault(); fogUndo(); return;
+  }
+  if ((e.metaKey || e.ctrlKey) && e.key === 'z' && e.shiftKey && currentMode === 'fog') {
+    e.preventDefault(); fogRedo(); return;
+  }
+  if ((e.metaKey || e.ctrlKey) && e.key === 'y' && currentMode === 'fog') {
+    e.preventDefault(); fogRedo(); return;
+  }
+  if (e.key === 'Escape') goHome();
+  if (e.key === 'r') setTool('reveal');
+  if (e.key === 'h') setTool('hide');
+  if (e.key === 't') toggleTextPanel();
+  if (e.key === 'p') toggleProjectionPanel();
+  if (e.key === 'c' && (currentMode === 'fog' || currentMode === 'image')) toggleCropPanel();
+  if (e.key === '1' && (currentMode === 'fog' || currentMode === 'image')) cropFit();
+  if (e.key === '2' && (currentMode === 'fog' || currentMode === 'image')) cropFill();
+  if (e.key === 'g' && currentMode === 'fog') toggleGrid();
+  if (e.key === 'l' && currentMode === 'fog') toggleLiveSync();
+  if (e.key === 's' && currentMode === 'fog' && !liveSync) syncNow();
+  if (e.key === 'q' && (currentMode === 'fog' || currentMode === 'image')) { rotateBy(-90); }
+  if (e.key === 'e' && (currentMode === 'fog' || currentMode === 'image')) { rotateBy(90); }
+  if (e.key === '[') { brushSize = Math.max(5, brushSize-10); const el=document.getElementById('brush-size'); if(el) el.value=brushSize; updateBrushPreview(); }
+  if (e.key === ']') { brushSize = Math.min(200, brushSize+10); const el=document.getElementById('brush-size'); if(el) el.value=brushSize; updateBrushPreview(); }
+});
+
+window.addEventListener('resize', () => {
+  if (isPlayerView && playerChannel) {
+    playerChannel.postMessage({
+      type: 'request-sync',
+      screenW: window.innerWidth,
+      screenH: window.innerHeight
+    });
+  }
+});
+
+function setStatus(msg) { const el = document.getElementById('status-left'); if (el) el.textContent = msg; }
+
+init();
+</script>
+</body>
+</html>

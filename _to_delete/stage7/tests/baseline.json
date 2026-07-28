@@ -1,0 +1,504 @@
+{
+ "crop.overlap": [
+  0,
+  20,
+  350,
+  300,
+  50,
+  0
+ ],
+ "crop.viewport": [
+  0,
+  314,
+  622,
+  350
+ ],
+ "errors.gm": [],
+ "errors.legacy-gm": [],
+ "errors.projector": [],
+ "errors.remote": [],
+ "errors.sidecar": [],
+ "fog.mask.len": 700000,
+ "fog.presets": [
+  "Default"
+ ],
+ "fog.rle.roundtrip": [
+  true,
+  286
+ ],
+ "key.aniso.centres": [
+  [
+   271,
+   256.6
+  ],
+  [
+   459.25,
+   361.2
+  ],
+  [
+   2341.75,
+   2662.4
+  ],
+  [
+   1400.5,
+   884.2
+  ]
+ ],
+ "key.aniso.steps": [
+  188.25,
+  209.2
+ ],
+ "key.aspect.note": "3.8% shorter than regular",
+ "key.hex.fingerprint": [
+  1003.3047,
+  998.094879502,
+  585795
+ ],
+ "key.hex.roundtrip": 0,
+ "key.hex.snap": [
+  [
+   203.55,
+   147.477
+  ],
+  [
+   443.4,
+   470.592
+  ],
+  [
+   816.5,
+   193.637
+  ]
+ ],
+ "key.hex.steps": [
+  53.3,
+  46.1592
+ ],
+ "key.hexflat.fingerprint": [
+  1000.5894,
+  1000.715138802,
+  596607
+ ],
+ "key.hexflat.roundtrip": 0,
+ "key.hexflat.snap": [
+  [
+   230.2,
+   132.091
+  ],
+  [
+   443.4,
+   439.819
+  ],
+  [
+   816.5,
+   224.409
+  ]
+ ],
+ "key.hexflat.steps": [
+  53.3,
+  61.5455
+ ],
+ "key.square.cellidx": [
+  [
+   3,
+   3,
+   203.55,
+   195.55
+  ],
+  [
+   0,
+   0,
+   43.65,
+   35.65
+  ],
+  [
+   18,
+   12,
+   1003.05,
+   675.25
+  ]
+ ],
+ "key.square.fingerprint": [
+  1000.98075,
+  1000.668642857,
+  731841
+ ],
+ "key.square.snap": [
+  [
+   96.95,
+   88.95
+  ],
+  [
+   523.35,
+   355.45
+  ],
+  [
+   949.75,
+   621.95
+  ]
+ ],
+ "key.square.steps": [
+  53.3,
+  53.3
+ ],
+ "library.entries": [
+  "/maps/Maps/printed-grid.png"
+ ],
+ "map.dims": [
+  1000,
+  700
+ ],
+ "map.mode": [
+  "fog",
+  "map"
+ ],
+ "map.relsrc": "/maps/Maps/printed-grid.png",
+ "notes.api": [
+  "harness probe",
+  1,
+  0
+ ],
+ "notes.labels.hex": [
+  [
+   "1,1",
+   "1,1"
+  ],
+  [
+   "1,2",
+   "1,2"
+  ],
+  [
+   "5,5",
+   "5,5"
+  ],
+  [
+   "11,3",
+   "11,3"
+  ],
+  [
+   "12,12",
+   "12,12"
+  ]
+ ],
+ "notes.labels.square": [
+  [
+   "1,1",
+   "1,1"
+  ],
+  [
+   "4,6",
+   "4,6"
+  ],
+  [
+   "13,19",
+   "13,19"
+  ]
+ ],
+ "notes.shippedkey": [
+  null,
+  "number"
+ ],
+ "projection.corners": {
+  "bl": {
+   "x": 0,
+   "y": 0
+  },
+  "br": {
+   "x": 0,
+   "y": 0
+  },
+  "tl": {
+   "x": 0,
+   "y": 0
+  },
+  "tr": {
+   "x": 0,
+   "y": 0
+  }
+ },
+ "projection.scale": 100,
+ "role.gm": [
+  "boolean",
+  true,
+  true
+ ],
+ "role.legacy-gm": [
+  false,
+  false,
+  null
+ ],
+ "role.projector": [
+  true,
+  false,
+  "map"
+ ],
+ "role.remote": [
+  false,
+  true,
+  null
+ ],
+ "role.sidecar": [
+  true,
+  false,
+  "show"
+ ],
+ "storage.keys": [
+  "gm-display:default:state",
+  "gm-display:default:library",
+  "gm-display:default:crop:X",
+  "gm-display:default:bg:X",
+  "gm-display:default:key:X",
+  "gm-display:camp:default:roster",
+  "gm-display:camp:default:map-tokens:X",
+  "gm-display:default:key:/X"
+ ],
+ "storage.mapkey.saved": {
+  "cell": 53.3,
+  "cellY": 0,
+  "cells": 19,
+  "enabled": true,
+  "link": true,
+  "ox": 17,
+  "oy": 9,
+  "type": "square"
+ },
+ "tokens.after.approve": [
+  310.15,
+  408.75,
+  null
+ ],
+ "tokens.after.create": [
+  [
+   "Alpha",
+   1,
+   523.35,
+   355.45,
+   9,
+   6
+  ],
+  [
+   "Alpha",
+   2,
+   576.65,
+   408.75,
+   10,
+   7
+  ]
+ ],
+ "tokens.anisotropic.dup": [
+  [
+   1,
+   523.35,
+   341.85,
+   9,
+   10
+  ],
+  [
+   2,
+   576.65,
+   373.55,
+   10,
+   11
+  ]
+ ],
+ "tokens.displayname": [
+  "Alpha 1",
+  "Alpha 2"
+ ],
+ "tokens.propose": [
+  310.15,
+  408.75,
+  "P"
+ ],
+ "ui.bindings": [
+  106,
+  []
+ ],
+ "ui.controls": [
+  "art-file-input",
+  "art-type",
+  "art-vault-select",
+  "brush-preview",
+  "brush-size",
+  "btn-crop-fill",
+  "btn-crop-fit",
+  "btn-fog-redo",
+  "btn-fog-undo",
+  "btn-grid",
+  "btn-hide",
+  "btn-key-hex",
+  "btn-key-hexflat",
+  "btn-key-square",
+  "btn-live-sync",
+  "btn-marker",
+  "btn-notes-mode",
+  "btn-reveal",
+  "btn-sync-now",
+  "btn-test-pattern",
+  "btn-tokgrid",
+  "campaign-select",
+  "corner-bl-val",
+  "corner-br-val",
+  "corner-tl-val",
+  "corner-tr-val",
+  "crop-hpos",
+  "crop-hpos-val",
+  "crop-pan-val",
+  "crop-panel",
+  "crop-vpos",
+  "crop-vpos-val",
+  "crop-zoom",
+  "crop-zoom-input",
+  "crop-zoom-val",
+  "drop-zone",
+  "file-input",
+  "game-select",
+  "game-switcher",
+  "gm-toolbar",
+  "grid-opacity-slider",
+  "grid-opacity-val",
+  "grid-px-slider",
+  "grid-px-val",
+  "grid-status",
+  "image-info",
+  "image-library",
+  "image-library-list",
+  "img-dest-label",
+  "img-filename",
+  "key-across",
+  "key-across-val",
+  "key-aspect-note",
+  "key-cell",
+  "key-cell-label",
+  "key-cell-val",
+  "key-celly",
+  "key-celly-label",
+  "key-celly-val",
+  "key-link",
+  "key-link-label",
+  "key-ox",
+  "key-ox-val",
+  "key-oy",
+  "key-oy-val",
+  "key-rowh-controls",
+  "key-rowh-wrap",
+  "library-list",
+  "library-wrap",
+  "map-bg-color",
+  "map-library",
+  "map-library-list",
+  "map-status",
+  "map-thumb",
+  "map-thumb-empty",
+  "map-thumb-label",
+  "map-thumb-wrap",
+  "mapkey-panel",
+  "marker-color",
+  "marker-status",
+  "mode-buttons",
+  "note-editor",
+  "note-list",
+  "notes-mode-status",
+  "pan-drag",
+  "poll-indicator",
+  "projection-panel",
+  "rotation-slider",
+  "rotation-val",
+  "scale-slider",
+  "scale-val",
+  "section-mapkey",
+  "section-notes",
+  "section-projector-adjustments",
+  "section-tokens",
+  "show-status",
+  "show-thumb",
+  "show-thumb-empty",
+  "show-thumb-label",
+  "show-thumb-wrap",
+  "sidebar-collapse-btn",
+  "sidebar-content",
+  "sidebar-header",
+  "sidebar-resize-handle",
+  "text-input",
+  "text-overlay-panel",
+  "tok-color",
+  "tok-image",
+  "tok-name",
+  "tok-roster-add",
+  "tok-roster-row",
+  "tok-side",
+  "token-list",
+  "tokgrid-cells",
+  "tokgrid-cells-val",
+  "tokgrid-color",
+  "tokgrid-opacity",
+  "tokgrid-status"
+ ],
+ "ui.inline_left": 0,
+ "ui.panels": [
+  "Displays",
+  "Library",
+  "Fog Tools",
+  "View",
+  "Projector Alignment",
+  "Map Grid",
+  "Cell Notes",
+  "Tokens",
+  "Text Overlay"
+ ],
+ "wire.broadcast": [
+  [
+   "tokens",
+   [
+    "grid",
+    "tokens",
+    "type"
+   ]
+  ],
+  [
+   "projection",
+   [
+    "background",
+    "corners",
+    "gridColor",
+    "gridEnabled",
+    "gridOpacity",
+    "gridPx",
+    "rotation",
+    "scale",
+    "type"
+   ]
+  ]
+ ],
+ "wire.grid": {
+  "cell": 53.3,
+  "cellY": 0,
+  "cells": 19,
+  "color": "rgba(120,200,255,0.5)",
+  "enabled": true,
+  "ox": 17,
+  "oy": 9,
+  "type": "square"
+ },
+ "wire.playerstate.keys": [
+  [
+   "/api/player_state",
+   [
+    "crop",
+    "fogRLE",
+    "grid",
+    "height",
+    "imageSrc",
+    "width"
+   ]
+  ],
+  [
+   "/api/tokens_state",
+   [
+    "grid",
+    "mapH",
+    "mapW",
+    "tokens"
+   ]
+  ]
+ ]
+}

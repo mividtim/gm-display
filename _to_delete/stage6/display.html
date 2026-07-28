@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>GM Display — Player Window</title>
+<link rel="stylesheet" href="css/gm-display.css">
+</head>
+<body>
+<div id="player-view">
+  <div id="player-rotation-wrap">
+    <div id="player-canvas-wrap">
+      <canvas id="player-canvas"></canvas>
+      <canvas id="player-grid-canvas"></canvas>
+      <canvas id="player-token-canvas" style="position:absolute;top:0;left:0;"></canvas>
+      <canvas id="player-marker-canvas" style="position:absolute;top:0;left:0;"></canvas>
+    </div>
+  </div>
+  <img id="player-image">
+  <div id="player-text-overlay"></div>
+</div>
+
+<!-- Remote player page (mode=remote): map + grid + tokens, no GM controls -->
+<script type="module" src="js/display.js"></script>
+</body>
+</html>

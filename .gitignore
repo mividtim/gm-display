@@ -11,3 +11,6 @@ __pycache__/
 
 # Build artifacts
 /tmp/
+
+# Artwork uploaded through the in-app "Upload…" control
+/uploads/

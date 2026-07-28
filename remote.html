@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>GM Display — Player</title>
+<link rel="stylesheet" href="css/gm-display.css">
+</head>
+<body>
+<div id="remote-view" >
+  <div id="remote-select">
+    <div class="remote-select-box">
+      <h2>Join the table</h2>
+      <input type="text" id="remote-name" placeholder="Your name" autocomplete="off">
+      <div class="remote-color-row">
+        <span>Your color</span>
+        <div id="remote-color-swatches"></div>
+      </div>
+      <div class="remote-pick-label">Pick your character</div>
+      <div id="remote-roster"><div class="remote-empty">Waiting for the GM…</div></div>
+    </div>
+  </div>
+  <div id="remote-stage" >
+    <canvas id="remote-canvas"></canvas>
+    <canvas id="remote-grid-canvas"></canvas>
+    <canvas id="remote-marker-canvas"></canvas>
+    <div id="remote-token-layer"></div>
+    <canvas id="remote-note-canvas"></canvas>
+  </div>
+  <div id="remote-note-panel"></div>
+  <div id="remote-bar" >
+    <span id="remote-color-dot"></span>
+    <span id="remote-who"></span>
+    <span id="remote-token-info"></span>
+    <button id="remote-change-btn">Change</button>
+    <button id="remote-marker-btn">Marker</button>
+    <button id="remote-notes-btn">Notes</button>
+  </div>
+</div>
+<script type="module" src="js/remote.js"></script>
+</body>
+</html>
