@@ -303,6 +303,7 @@ export function toggleLiveSync() {
     // Turning live back on — push everything now
     syncNow();
   }
+  updateStagedBanner();
   saveState();
 }
 
@@ -324,6 +325,7 @@ export function syncNow() {
   S.hasPendingSync = false;
   const syncBtn = document.getElementById('btn-sync-now');
   if (syncBtn) syncBtn.classList.remove('pending');
+  updateStagedBanner();
   setStatus(S.fogContext === 'show' ? 'Synced to sidecar' : 'Synced to projector');
 }
 
@@ -331,4 +333,20 @@ export function markPendingSync() {
   S.hasPendingSync = true;
   const syncBtn = document.getElementById('btn-sync-now');
   if (syncBtn) syncBtn.classList.add('pending');
+  updateStagedBanner();
+}
+
+// Staged mode survives a reload, and the only signs of it were a small button
+// reading "Staged" and a pulsing "Sync Now" — both inside Fog Tools, which is
+// collapsed by default. So the projector silently stops updating and nothing
+// visible says why. This banner sits over the map, where it cannot be
+// collapsed away, and only while there is genuinely something unsent.
+export function updateStagedBanner() {
+  const el = document.getElementById('fog-staged-banner');
+  if (!el) return;
+  const show = !S.liveSync && S.hasPendingSync && S.currentMode === 'fog';
+  el.style.display = show ? 'flex' : 'none';
+  if (!show || el._wired) return;
+  el._wired = true;
+  el.addEventListener('click', () => syncNow());
 }

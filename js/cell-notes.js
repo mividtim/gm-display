@@ -394,11 +394,18 @@ function renderNotesList() {
     const na = a.split(',').map(Number), nb = b.split(',').map(Number);
     return (na[0] - nb[0]) || (na[1] - nb[1]);
   });
+  // Always name the file, even — especially — when there are no notes. Notes
+  // are keyed per map image, so "no notes on this map" and "you have the wrong
+  // map open" look identical unless the panel says which file it is reading.
   const fileLine = noteFile
-    ? '<div style="font-size:10px;color:#666;margin-top:6px;word-break:break-all;">' + noteFile + '</div>'
+    ? '<div style="font-size:10px;color:#666;margin-top:6px;word-break:break-all;">'
+      + 'Reading: ' + esc(noteFile) + '</div>'
     : '';
   if (!keys.length) {
-    list.innerHTML = '<div style="color:#888;font-size:11px;">No notes on this map yet.</div>' + fileLine;
+    list.innerHTML = '<div style="color:#888;font-size:11px;">No notes on <b>'
+      + esc(currentMap().split('/').pop() || 'this map') + '</b> yet. '
+      + 'Notes belong to the map file — another copy of the same map has its own.'
+      + '</div>' + fileLine;
     return;
   }
   list.innerHTML = keys.map(k =>
@@ -435,8 +442,13 @@ export function initCellNotes() {
 export function notesOnMapChanged() {
   selectedCell = null;
   notes = {};
+  noteFile = '';
   closeNotePop();
   hideTip();
+  // Paint the empty state now. loadNotes(silent) only repaints on a diff, and
+  // {} vs {} is not a diff — so on a map with no notes the panel would keep
+  // showing the last map's, which is worse than showing nothing.
+  renderNotesPanel();
   loadNotes(true);
   setPartyNotesMap(currentMap());
 }

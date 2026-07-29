@@ -22,7 +22,8 @@ S.tokens = [];                 // tokens ACTIVE ON THE CURRENT MAP; mirrored on 
 S.roster = [];
 S.tokenMapSrc = null;          // map src whose placements are currently hydrated
 S.tokensReady = false;         // guards saves until loadTokens() has run
-S.tokenGridEnabled = true;
+S.tokenGridEnabled = true;   // this map is calibrated: snap, address cells, notes
+S.tokenGridShow = true;      // ...and draw the lines (off for maps with a printed grid)
 S.tokenGridCells = 24;
 S.tokenGridType = 'square';    // 'square' | 'hex' (pointy-top)
 S.tokenGridColor = 'rgba(120,200,255,0.5)';  // grid line color (rgba)
@@ -172,7 +173,13 @@ export function snapNorm(tx, ty) {
 // Draw the grid (square or hex) using a map-px -> canvas-px transform `m2c`.
 // This makes the same code work full-map (GM) or cropped (projector/remote).
 export function drawMapGrid(ctx, m2c, mw, mh, color) {
-  if (!S.tokenGridEnabled) return;
+  // Two separate questions, and they used to be one flag. `tokenGridEnabled`
+  // is "this map is calibrated" — it drives snapping, cell addresses and
+  // notes. `tokenGridShow` is "draw the lines". A map with a grid already
+  // printed on it (the realm sheet, most battlemaps) wants the first and not
+  // the second: overlaying our hexes on its hexes gives the table two grids
+  // to look at, one of which is ours.
+  if (!S.tokenGridEnabled || !S.tokenGridShow) return;
   ctx.strokeStyle = color || 'rgba(120,200,255,0.30)';
   ctx.lineWidth = 1;
   ctx.beginPath();

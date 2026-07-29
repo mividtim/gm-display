@@ -1083,3 +1083,24 @@ body {
 }
 /* Marker-mode cursor hint on map surfaces */
 .marker-arming { cursor: crosshair !important; }
+
+/* Staged-mode warning, over the map. Sticky setting + collapsed controls =
+   a projector that silently stops updating; this is the one signal that
+   cannot be collapsed away. */
+#fog-staged-banner {
+  display: none;
+  position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+  z-index: 40;
+  align-items: center; gap: 12px;
+  padding: 7px 14px;
+  background: rgba(198,102,51,0.95);
+  border: 1px solid #e85; border-radius: 6px;
+  color: #fff; font: 12px/1.2 system-ui, sans-serif;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.5);
+}
+#fog-staged-banner .fsb-act {
+  padding: 3px 9px; border-radius: 4px;
+  background: rgba(0,0,0,0.35); font-weight: 700;
+}
+#fog-staged-banner:hover { background: rgba(220,120,64,0.98); }

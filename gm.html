@@ -124,7 +124,10 @@
     </div>
   </div>
 
-  <details class="sb-section">
+  <!-- Open by default: this is the panel you actually work in. Reveal All,
+       Hide All and Sync Now all live here, and with it collapsed the GM has no
+       visible way to put the map on the projector. -->
+  <details class="sb-section" open>
     <summary>Fog Tools</summary>
     <div class="sb-body">
       <div id="gm-toolbar">
@@ -345,9 +348,9 @@
         The grid locked to the map — what tokens snap to, drawn on every screen.
         Calibrate it against a grid already printed on the map. Saved per map.
       </div>
-        <label>Snap grid: <span class="val" id="tokgrid-status">ON</span></label>
+        <label>Draw grid lines: <span class="val" id="tokgrid-status">ON</span></label>
         <div style="display:flex;gap:4px;margin-bottom:6px;">
-          <button id="btn-tokgrid" class="active" style="flex:1;">Toggle Snap Grid</button>
+          <button id="btn-tokgrid" class="active" style="flex:1;" title="Snapping, cell addresses and notes keep working either way — turn the lines off on a map that already has a grid printed on it">Toggle Grid Lines</button>
         </div>
         <input type="hidden" id="tokgrid-cells" value="24"><span id="tokgrid-cells-val" style="display:none;">24</span>
         <label>Grid color &amp; opacity</label>
@@ -544,6 +547,12 @@
         <div id="gm-token-layer" style="position:absolute;top:0;left:0;width:100%;height:100%;"></div>
         <div id="gm-notes-layer" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:5;cursor:crosshair;"></div>
         <div id="viewport-outline"></div>
+        <!-- Staged mode is sticky and its controls live in a collapsible
+             section; this cannot be collapsed away. -->
+        <div id="fog-staged-banner" title="Click to push these changes to the projector">
+          <span>Staged — the projector is <b>not</b> showing your latest fog edits</span>
+          <span class="fsb-act">Sync Now</span>
+        </div>
       </div>
     </div>
   </div>

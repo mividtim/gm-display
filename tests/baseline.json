@@ -466,6 +466,7 @@
   "link": true,
   "ox": 17,
   "oy": 9,
+  "show": true,
   "type": "square"
  },
  "tokens.after.approve": [
@@ -694,6 +695,7 @@
   "enabled": true,
   "ox": 17,
   "oy": 9,
+  "show": true,
   "type": "square"
  },
  "wire.playerstate.keys": [

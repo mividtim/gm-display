@@ -270,3 +270,57 @@ swallows the click it is describing is worse than one that never appears.
 
 Mutation-tested: dropping the escape and letting the tooltip take pointer
 events are each caught.
+
+## session.py — the test that should have existed first
+
+`regress.py` is white-box: it calls internals and diffs a snapshot. It was
+green for days while the projector showed the players a black rectangle,
+because nothing in it ever asked the only question that matters at the table:
+**can the players see the map?**
+
+`tests/session.py` drives the app the way a GM does — through the real
+controls, in a real second window — and asserts on **pixels in the projector
+canvas**. Run it after any change that could touch what reaches the table:
+
+    python3 tests/session.py
+
+It covers loading a map with the projector open, Reveal All / Hide All,
+Staged mode not reaching the projector, the staged warning being visible and
+clickable, grid lines drawing separately from grid snapping, and a map with no
+notes naming itself.
+
+Three real defects it found on its first run, all of which regress.py was
+happy with:
+
+1. **Reveal All was inside a collapsed panel.** Fog Tools is the panel a GM
+   works in and it was closed by default, so the primary control for putting a
+   map on the projector was invisible. Now `open`, and asserted: any control a
+   GM needs mid-session must be reachable without expanding something.
+2. **Staged mode had no visible signal.** It is sticky across reloads, and its
+   only indicators — a button reading "Staged" and a pulsing "Sync Now" — were
+   both inside that same collapsed panel. The projector silently stops updating
+   and nothing says why. There is now a banner over the map, which cannot be
+   collapsed away and syncs when clicked.
+3. **Switching to a map with no notes left the previous map's notes on screen.**
+   `notesOnMapChanged` cleared `notes` and called `loadNotes(silent)`, which
+   only repaints on a diff — and `{}` vs `{}` is not a diff, so the panel kept
+   the old map's list. It repaints on the map change now.
+
+A note on thresholds: the first version asserted "more than 60% of the
+projector is lit". That passes on a pale fixture and fails on a dark map, which
+is a property of the artwork, not a bug. It now compares each map against its
+own fogged state, so the assertion is "revealing changed what the table sees".
+
+## Drawing the grid vs using it
+
+These were one flag, `tokenGridEnabled`, so turning off the overlay also killed
+snapping, cell addresses and notes. They are now separate:
+
+- `tokenGridEnabled` — this map is calibrated. Drives snapping, cell labels,
+  hover notes, the Company's hex readout.
+- `tokenGridShow` — draw the lines.
+
+Most maps worth using already have a grid printed on them. Overlaying ours gives
+the table two grids, one of which is a blue approximation of the other. Both
+realm maps ship `"show": false` in their `.key.json` for exactly that reason:
+calibrate to the printed hexes, don't redraw them.

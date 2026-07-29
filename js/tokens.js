@@ -64,7 +64,8 @@ function saveMapKey(src) {
   if (S.isPlayerView || S.isRemoteView || !src) return;
   try {
     localStorage.setItem(mapKeyStorageKey(src), JSON.stringify({
-      type: S.tokenGridType, cells: S.tokenGridCells, enabled: S.tokenGridEnabled,
+      type: S.tokenGridType, cells: S.tokenGridCells,
+      enabled: S.tokenGridEnabled, show: S.tokenGridShow,
       cell: S.keyCellPx, cellY: S.keyCellYPx, ox: S.keyOx, oy: S.keyOy, link: S.keyLinkXY
     }));
   } catch (e) { console.warn('save map key failed', e); }
@@ -76,6 +77,7 @@ function applySavedMapKey(src) {
   try { const raw = localStorage.getItem(mapKeyStorageKey(src)); if (raw) k = JSON.parse(raw); } catch (e) {}
   if (k) {
     if (typeof k.enabled === 'boolean') S.tokenGridEnabled = k.enabled;
+    if (typeof k.show === 'boolean') S.tokenGridShow = k.show;
     if (k.cells) S.tokenGridCells = k.cells;
     if (k.type) S.tokenGridType = k.type;
     S.keyCellPx  = +k.cell  || 0;
@@ -104,6 +106,7 @@ async function applyShippedMapKey(src) {
     if (!k || relMapSrc(S.lastMapSrc || '') !== relMapSrc(src || '')) return;
     if (k.shape) setKeyShape(k.shape);
     if (typeof k.enabled === 'boolean') S.tokenGridEnabled = k.enabled;
+    if (typeof k.show === 'boolean') S.tokenGridShow = k.show;
     S.keyCellPx  = +k.cell  || 0;
     S.keyCellYPx = +k.cellY || 0;
     S.keyOx = +k.ox || 0;
@@ -223,8 +226,8 @@ export function initTokensGM() {
   const _set = (id, fn) => { const el = document.getElementById(id); if (el) fn(el); };
   _set('tokgrid-cells', el => el.value = S.tokenGridCells);
   _set('tokgrid-cells-val', el => el.textContent = S.tokenGridCells);
-  _set('tokgrid-status', el => el.textContent = S.tokenGridEnabled ? 'ON' : 'OFF');
-  _set('btn-tokgrid', el => el.classList.toggle('active', S.tokenGridEnabled));
+  _set('tokgrid-status', el => el.textContent = S.tokenGridShow ? 'ON' : 'OFF');
+  _set('btn-tokgrid', el => el.classList.toggle('active', S.tokenGridShow));
   updateGridShapeButton();
   initGridColorControls();
   document.getElementById('marker-color').value = S.markerColor;
@@ -466,10 +469,15 @@ export function refreshTokenImageOptions() {
   }).catch(() => {});
 }
 
+// Toggles whether the grid is DRAWN. Snapping, cell addresses and notes keep
+// working either way — a map with its own printed grid still needs to be
+// calibrated to it, it just does not need ours painted on top.
 export function toggleTokenGrid() {
-  S.tokenGridEnabled = !S.tokenGridEnabled;
-  document.getElementById('tokgrid-status').textContent = S.tokenGridEnabled ? 'ON' : 'OFF';
-  document.getElementById('btn-tokgrid').classList.toggle('active', S.tokenGridEnabled);
+  S.tokenGridShow = !S.tokenGridShow;
+  const st = document.getElementById('tokgrid-status');
+  if (st) st.textContent = S.tokenGridShow ? 'ON' : 'OFF';
+  const b = document.getElementById('btn-tokgrid');
+  if (b) b.classList.toggle('active', S.tokenGridShow);
   renderGMTokens(); broadcastTokens(); pushTokensToServer(); saveTokens();
 }
 function setTokenGridCells(v) {
@@ -826,7 +834,7 @@ export function applyPlayerAction(a) {
 // `cells` plus the map-key calibration (absolute cell size and origin offset).
 export function gridWirePayload() {
   return {
-    enabled: S.tokenGridEnabled, cells: S.tokenGridCells,
+    enabled: S.tokenGridEnabled, show: S.tokenGridShow, cells: S.tokenGridCells,
     type: S.tokenGridType, color: S.tokenGridColor,
     cell: S.keyCellPx, cellY: S.keyCellYPx, ox: S.keyOx, oy: S.keyOy
   };
@@ -834,6 +842,8 @@ export function gridWirePayload() {
 export function applyGridWire(g) {
   if (!g) return;
   S.tokenGridEnabled = !!g.enabled;
+  // Older senders have no `show`; a missing one means "draw it", as before.
+  S.tokenGridShow = (g.show === undefined) ? true : !!g.show;
   S.tokenGridCells = g.cells || 24;
   S.tokenGridType = g.type || 'square';
   if (g.color) S.tokenGridColor = g.color;
@@ -896,7 +906,8 @@ function saveTokens() {
       owner: t.owner || '', ownerColor: t.ownerColor || ''
     }));
     localStorage.setItem(campaignKey('roster'), JSON.stringify({
-      roster: defs, tokenGridEnabled: S.tokenGridEnabled, tokenGridCells: S.tokenGridCells, tokenGridType: S.tokenGridType, tokenGridColor: S.tokenGridColor
+      roster: defs, tokenGridEnabled: S.tokenGridEnabled, tokenGridShow: S.tokenGridShow,
+      tokenGridCells: S.tokenGridCells, tokenGridType: S.tokenGridType, tokenGridColor: S.tokenGridColor
     }));
     const placements = {};
     S.tokens.forEach(t => { placements[t.id] = { tx: t.tx, ty: t.ty, onMap: !!t.onMap }; });
@@ -914,6 +925,7 @@ export function loadTokens() {
       S.roster = Array.isArray(s.roster) ? s.roster : [];
       S.roster.forEach(t => { t.pending = null; if (t.owner === undefined) t.owner = ''; });
       if (typeof s.tokenGridEnabled === 'boolean') S.tokenGridEnabled = s.tokenGridEnabled;
+      if (typeof s.tokenGridShow === 'boolean') S.tokenGridShow = s.tokenGridShow;
       if (s.tokenGridCells) S.tokenGridCells = s.tokenGridCells;
       S.tokenGridType = ['hex', 'hexflat'].includes(s.tokenGridType) ? s.tokenGridType : 'square';
       if (s.tokenGridColor) S.tokenGridColor = s.tokenGridColor;
