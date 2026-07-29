@@ -8,7 +8,7 @@ refactor can be verified by diffing instead of by hoping.
     ...make changes...
     python3 tests/regress.py after.json baseline.json # capture + diff, exits 1 on drift
 
-59 probes covering: map-key geometry (square, both hex orientations, and the
+65 probes covering: map-key geometry (square, both hex orientations, and the
 anisotropic case) with a 2000-point fingerprint per shape; fog RLE round-trip
 and presets; crop maths including out-of-bounds overlap; token create,
 duplicate, snap, propose and approve; localStorage key naming; the exact shapes
@@ -141,3 +141,38 @@ the tokens and swallows every drag).
 Mutation-tested: unhiding `#remote-stage`, dropping the same-author replace in
 `notes_api._save_party`, and leaving the note canvas permanently clickable are
 each caught.
+
+## The Company
+
+The party as one piece — which is how a realm-scale map wants to move players:
+one marker crossing hexes, not five portraits stacked on the same hex. It is a
+third `side` alongside `pc` and `npc`:
+
+- **One per campaign.** The button creates it or brings the existing one back
+  onto this map; duplicating it is refused.
+- **On every map**, like a PC, but starting in the middle rather than the PC row.
+- **Owned by nobody**, so any player who has joined may propose its move — the
+  GM still approves. `applyPlayerAction` already allowed a propose on an
+  unowned token, so this needed no new rule, only a token with no owner.
+- **Never claimable.** The remote roster offers `side === 'pc'` only.
+- Drawn to fill its cell (`tokenFrac` 1.0 against 0.96) with a gold double ring
+  on GM, projector and player views alike.
+
+`company.persists` exists because the roster save used to normalise any
+non-`pc` side to `npc`, which would have silently demoted the Company on the
+next reload — the map would look right all session and be wrong tomorrow.
+
+Mutation-tested: restoring that normalisation, restricting `propose` to the
+owner, and drawing the Company at figure size are each caught.
+
+`company.cellhere` covers the readout in the token list. On a keyed map the
+useful fact about a token is its cell, so the list reads "The Company · 5,5".
+It is blank when the map has no calibration, because then an address would be
+a guess.
+
+## Note pips and clutter
+
+`drawNoteMarkers` draws the GM's own gold pips only while Notes mode is on. The
+realm sheet carries prep on all 144 hexes, and 144 gold dots over the artwork
+tell the GM nothing during play. Party pips are always drawn: they are news,
+and there are never many.

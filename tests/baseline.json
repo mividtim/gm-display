@@ -1,4 +1,44 @@
 {
+ "company.anyone.proposes": [
+  true,
+  "Ayla",
+  true,
+  "Bors"
+ ],
+ "company.cellhere": [
+  [
+   "1,1",
+   "1,1"
+  ],
+  [
+   "4,6",
+   "4,6"
+  ],
+  [
+   "9,13",
+   "9,13"
+  ]
+ ],
+ "company.create": [
+  1,
+  1,
+  "The Company",
+  "party",
+  true,
+  "",
+  "#d4a017"
+ ],
+ "company.no.duplicate": 1,
+ "company.persists": [
+  "party"
+ ],
+ "company.size": [
+  1,
+  0.96,
+  "party",
+  "pc",
+  "npc"
+ ],
  "crop.overlap": [
   0,
   20,
@@ -359,7 +399,7 @@
   "P"
  ],
  "ui.bindings": [
-  106,
+  107,
   []
  ],
  "ui.controls": [
@@ -368,6 +408,7 @@
   "art-vault-select",
   "brush-preview",
   "brush-size",
+  "btn-company",
   "btn-crop-fill",
   "btn-crop-fit",
   "btn-fog-redo",

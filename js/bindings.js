@@ -14,9 +14,9 @@ import { deleteActiveGame, moveModulePrompt, newCampaignPrompt, newGamePrompt, o
 import { openDisplay } from './init.js';
 import { addArtFromVault, refreshArtVaultOptions } from './per-map-store.js';
 import { nudgeCorner, resetCorner, resetProjection, rotateBy, setBg, setGridColor, setRotation, toggleGrid, toggleTestPattern, updateGridOpacity, updateGridSize, updateScale } from './projection.js';
-import { remoteChangeCharacter, remoteToggleMarker } from './remote-page.js';
+import { remoteChangeCharacter, remoteToggleMarker, remoteToggleNotes } from './remote-page.js';
 import { fogRedo, fogUndo, hideAll, revealAll, toggleSidebarCollapsed } from './sidebar.js';
-import { addRosterTokenFromSelect, createTokenFromForm, nudgeKeyCell, nudgeKeyCellY, nudgeKeyOrigin, refreshTokenImageOptions, resetMapKey, setKeyAcross, setKeyCell, setKeyCellY, setKeyOx, setKeyOy, setKeyShape, setTokenGridColor, toggleKeyLink, toggleMarkerMode, toggleTokenGrid } from './tokens.js';
+import { addCompanyToken, addRosterTokenFromSelect, createTokenFromForm, nudgeKeyCell, nudgeKeyCellY, nudgeKeyOrigin, refreshTokenImageOptions, resetMapKey, setKeyAcross, setKeyCell, setKeyCellY, setKeyOx, setKeyOy, setKeyShape, setTokenGridColor, toggleKeyLink, toggleMarkerMode, toggleTokenGrid } from './tokens.js';
 const unbound = [];
 let bound = 0;
 
@@ -127,6 +127,7 @@ export function attachGmBindings() {
   bind('[data-act="b62"]', 'click', () => { resetMapKey(); });
   bind('[data-act="b63"]', 'click', () => { refreshTokenImageOptions(); });
   bind('[data-act="b64"]', 'click', () => { createTokenFromForm(); });
+  bind('#btn-company', 'click', () => { addCompanyToken(); });
   bind('[data-act="b65"]', 'click', () => { addRosterTokenFromSelect(); });
   bind('#btn-marker', 'click', () => { toggleMarkerMode(); });
   bind('[data-act="b66"]', 'click', () => { showTextOnPlayer(); });
@@ -142,6 +143,7 @@ export function attachPlayerBindings() {
 }
 
 export function attachRemoteBindings() {
+  bind('#remote-notes-btn', 'click', () => { remoteToggleNotes(); });
   bind('#remote-change-btn', 'click', () => { remoteChangeCharacter(); });
   bind('#remote-marker-btn', 'click', () => { remoteToggleMarker(); });
   return unbound;

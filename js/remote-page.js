@@ -1,7 +1,7 @@
 // GM Display — remote-page.js
 // The remote player page.
 import { rlDecode } from './games.js';
-import { REMOTE_COLORS, TOKEN_FRAC, cellAtMapPx, cellCenterMapPx, cellFromLabel, cellLabel, clamp01, drawMapGrid, kTokenDiam, snapNorm, tokenDisplayName, uid } from './geometry.js';
+import { REMOTE_COLORS, TOKEN_FRAC, cellAtMapPx, cellCenterMapPx, cellFromLabel, cellLabel, clamp01, drawMapGrid, isParty, kTokenDiam, snapNorm, tokenClass, tokenDisplayName, tokenFrac, uid } from './geometry.js';
 import { drawAllMarkers, ensureMarkerLoop } from './markers.js';
 import { onPartyNotesChanged, partyNotes, partyNotesFor, savePartyNote, setPartyNotesMap, startPartyNotesPolling } from './party-notes.js';
 import { slugify } from './state.js';
@@ -375,18 +375,26 @@ function renderRemoteTokens() {
   const mw = S.remoteFrame.width;
   const diamPx = kTokenDiam(mw) * S.remoteScale * TOKEN_FRAC;
   const mine = S.tokens.find(t => t.id === S.remoteClaimId);
+  const company = S.tokens.find(t => isParty(t) && t.onMap);
   document.getElementById('remote-token-info').textContent =
-    mine ? ('Playing ' + tokenDisplayName(mine) + ' — drag to move') : '';
+    mine ? ('Playing ' + tokenDisplayName(mine)
+            + (company ? ' — drag ' + tokenDisplayName(company) + ' to move the party'
+                       : ' — drag to move'))
+         : '';
   // Draw only tokens the GM has made visible on this map (onMap is per-map).
   S.tokens.filter(t => t.onMap).forEach(t => {
-    const canControl = (t.id === S.remoteClaimId);
-    layer.appendChild(makeRemoteTokenEl(t, t.tx, t.ty, diamPx, false, canControl));
-    if (t.pending) layer.appendChild(makeRemoteTokenEl(t, t.pending.tx, t.pending.ty, diamPx, true, false));
+    // The Company belongs to the whole table, so anyone who has joined may
+    // propose its move — it is not one player's piece to hold.
+    const canControl = (t.id === S.remoteClaimId) || (isParty(t) && !!S.myActorName);
+    layer.appendChild(makeRemoteTokenEl(t, t.tx, t.ty, diamPx * tokenFrac(t) / TOKEN_FRAC,
+                                        false, canControl));
+    if (t.pending) layer.appendChild(makeRemoteTokenEl(t, t.pending.tx, t.pending.ty,
+                                        diamPx * tokenFrac(t) / TOKEN_FRAC, true, false));
   });
 }
 function makeRemoteTokenEl(t, tx, ty, diamPx, isGhost, canControl) {
   const el = document.createElement('div');
-  el.className = 'token ' + (t.side === 'pc' ? 'pc' : 'npc') + (isGhost ? ' ghost' : '') + (canControl ? ' draggable' : '');
+  el.className = 'token ' + tokenClass(t) + (isGhost ? ' ghost' : '') + (canControl ? ' draggable' : '');
   const mw = S.remoteFrame.width, mh = S.remoteFrame.height;
   const p = remoteMapToCanvas(tx * mw, ty * mh);
   el.style.left = p.x + 'px'; el.style.top = p.y + 'px';

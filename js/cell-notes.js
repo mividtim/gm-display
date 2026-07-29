@@ -63,6 +63,7 @@ export function toggleNotesMode() {
   if (st) st.textContent = notesMode ? 'ON' : 'OFF';
   const tl = el('gm-token-layer');
   if (tl) tl.classList.toggle('markerblock', notesMode);
+  drawNoteMarkers();          // your pips appear with the mode and go with it
   if (notesMode) loadNotes();
 }
 
@@ -112,8 +113,14 @@ export function drawNoteMarkers() {
     ctx.fill(); ctx.stroke();
   };
   const party = partyNotes();
-  for (const label of Object.keys(notes)) pip(label, 'rgba(255,203,84,0.92)', party[label] ? -r : 0);
-  for (const label of Object.keys(party)) pip(label, 'rgba(96,165,250,0.95)', notes[label] ? r : 0);
+  // Your own pips only while you are working with notes. On a realm sheet every
+  // hex carries prep, and 144 gold dots over the art tell you nothing during
+  // play. What the party wrote is always shown: that is news, and there is
+  // never much of it.
+  if (notesMode) {
+    for (const label of Object.keys(notes)) pip(label, 'rgba(255,203,84,0.92)', party[label] ? -r : 0);
+  }
+  for (const label of Object.keys(party)) pip(label, 'rgba(96,165,250,0.95)', (notesMode && notes[label]) ? r : 0);
   if (selectedCell) {
     const cell = cellFromLabel(selectedCell);
     if (cell) {

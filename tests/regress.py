@@ -260,6 +260,54 @@ async def capture(pg, results):
     await pg.evaluate("document.getElementById('key-link').checked=true; toggleKeyLink(); setKeyCell(53.3);")
     await pg.wait_for_timeout(150)
 
+    # --- the Company ---------------------------------------------------------
+    # The party as one piece: exactly one per campaign, on every map, owned by
+    # nobody so anyone at the table may propose its move.
+    await pg.evaluate("tokens=[]; roster=[];")
+    await pg.evaluate("addCompanyToken(); addCompanyToken();")   # twice: still one
+    await pg.wait_for_timeout(250)
+    put('company.create', await pg.evaluate("""(()=>{
+        const c = roster.filter(t=>t.side==='party');
+        const t = c[0];
+        return [c.length, tokens.filter(x=>x.side==='party').length,
+                t.base, t.side, t.onMap, t.owner, t.color];})()"""))
+    put('company.no.duplicate', await pg.evaluate("""(()=>{
+        const t = tokens.find(x=>x.side==='party');
+        duplicateToken(t.id);
+        return roster.filter(x=>x.side==='party').length;})()"""))
+    # 'party' must survive the roster round-trip. The old save normalised any
+    # non-'pc' side to 'npc', which would silently demote the Company on reload.
+    put('company.persists', await pg.evaluate("""(()=>{
+        const raw = localStorage.getItem(campaignKey('roster'));
+        const sides = JSON.parse(raw).roster.map(t=>t.side).sort();
+        return sides;})()"""))
+    # Anyone may move it — it is not one player's piece to hold.
+    put('company.anyone.proposes', await pg.evaluate("""(()=>{
+        const t = tokens.find(x=>x.side==='party');
+        const a = applyPlayerAction({kind:'propose', tokenId:t.id, player:'Ayla', tx:0.31, ty:0.62});
+        const first = t.pending && t.pending.by;
+        const b = applyPlayerAction({kind:'propose', tokenId:t.id, player:'Bors', tx:0.44, ty:0.28});
+        return [a, first, b, t.pending && t.pending.by];})()"""))
+    # And it draws bigger than a figure — it is a group, and it must read as one
+    # across a lit room.
+    put('company.size', await pg.evaluate("""(()=>{
+        const G=window.GMD, t=tokens.find(x=>x.side==='party'), pc=tokens.find(x=>x.side!=='party');
+        return [G.tokenFrac(t), pc ? G.tokenFrac(pc) : G.TOKEN_FRAC,
+                G.tokenClass(t), G.tokenClass({side:'pc'}), G.tokenClass({side:'npc'})];})()"""))
+    # Where it is standing, in row,col — the fact you actually read off the list.
+    put('company.cellhere', await pg.evaluate("""(()=>{
+        const G=window.GMD, t=tokens.find(x=>x.side==='party');
+        const out=[];
+        for (const lab of ['1,1','4,6','9,13']) {
+          const m=G.cellCenterMapPx(G.cellFromLabel(lab), mapWidth, mapHeight);
+          const s=G.snapNorm(m.x/mapWidth, m.y/mapHeight);
+          t.tx=s.tx; t.ty=s.ty;
+          out.push([lab, G.cellHere(t)]);
+        }
+        return out;})()"""))
+    await pg.evaluate("tokens=[]; roster=[]; localStorage.removeItem(campaignKey('roster'));")
+    await pg.wait_for_timeout(150)
+
     # --- outbound wire shapes ------------------------------------------------
     put('wire.grid', await pg.evaluate("gridWirePayload()"))
     put('wire.broadcast', await pg.evaluate("""(()=>{

@@ -792,6 +792,25 @@ body {
 }
 .token.pc  { border-color: #5fd0ff; }
 .token.npc { border-color: #ff7a6b; }
+/* The Company — the party as one piece. Double-ringed and gold so it reads as
+   "the party is here" at realm scale rather than as one more coloured disc. */
+.token.party {
+  border-color: #ffcf5c;
+  border-width: 3px;
+  box-shadow: 0 0 0 3px rgba(255,207,92,0.35), 0 2px 8px rgba(0,0,0,0.7);
+  z-index: 4;
+}
+.token.party .tok-label {
+  display: block;
+  position: absolute;
+  top: 100%; left: 50%;
+  transform: translate(-50%, 2px);
+  white-space: nowrap;
+  font: 700 10px/1.2 system-ui, sans-serif;
+  color: #ffe6a8;
+  text-shadow: 0 0 3px #000, 0 0 3px #000;
+  pointer-events: none;
+}
 .token.draggable { cursor: grab; }
 .token.draggable:active { cursor: grabbing; }
 .token.ghost {

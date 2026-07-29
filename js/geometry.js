@@ -81,6 +81,16 @@ export function relMapSrc(s) {
 }
 export function tokenDisplayName(t) { return t.num > 0 ? (t.base + ' ' + t.num) : t.base; }
 
+// A token is one of three things. 'party' is the Company: the whole group as a
+// single piece, which is how a realm-scale map wants to move the players —
+// one marker crossing hexes, not five portraits stacked on the same hex.
+// It belongs to no one player, so anyone at the table may propose its move.
+export const TOKEN_SIDES = ['pc', 'npc', 'party'];
+export const isParty = (t) => !!t && t.side === 'party';
+// The Company fills its hex; individual figures sit slightly inside theirs.
+export function tokenFrac(t) { return isParty(t) ? 1.0 : TOKEN_FRAC; }
+export function tokenClass(t) { return isParty(t) ? 'party' : (t && t.side === 'pc' ? 'pc' : 'npc'); }
+
 // ---- grid geometry & snapping ----
 // The grid is defined in MAP pixel coordinates so it stays locked to the map as
 // any surface pans/zooms. `tokenGridCells` = columns across the map width.

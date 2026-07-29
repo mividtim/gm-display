@@ -1,6 +1,6 @@
 // GM Display — projector.js
 // Projector mirror: draws tokens, grid and markers under the keystone warp.
-import { TOKEN_FRAC, drawMapGrid, kTokenDiam } from './geometry.js';
+import { drawMapGrid, isParty, kTokenDiam, tokenFrac } from './geometry.js';
 import { ensureMarkerLoop } from './markers.js';
 import { S } from './store.js';
 import { applyGridWire } from './tokens.js';
@@ -35,8 +35,9 @@ export function drawProjectorOverlay() {
   if (xf.rot) ctx.rotate(xf.rot * Math.PI / 180);
   // snap grid (so players see cells even inside black fog)
   if (S.pTokenGrid.enabled) drawProjGrid(ctx, xf);
-  const rad = kTokenDiam(xf.mapW) * xf.scale * (TOKEN_FRAC / 2);
+  const unit = kTokenDiam(xf.mapW) * xf.scale / 2;
   S.pTokens.filter(t => t.onMap).forEach(t => {
+    const rad = unit * tokenFrac(t);
     const p = normToProjPre(t.tx, t.ty, xf);
     drawTokenCircle(ctx, p.x, p.y, rad, t, false);
     if (t.pending) {
@@ -64,11 +65,19 @@ function drawTokenCircle(ctx, x, y, r, t, isGhost) {
     ctx.fillStyle = isGhost ? '#9aa' : t.color;
     ctx.fill();
   }
-  ctx.lineWidth = Math.max(2, r * 0.12);
-  ctx.strokeStyle = isGhost ? '#cfd6e0' : (t.ownerColor || (t.side === 'pc' ? '#5fd0ff' : '#ff7a6b'));
+  ctx.lineWidth = Math.max(2, r * (isParty(t) ? 0.16 : 0.12));
+  ctx.strokeStyle = isGhost ? '#cfd6e0'
+    : (t.ownerColor || (isParty(t) ? '#ffcf5c' : (t.side === 'pc' ? '#5fd0ff' : '#ff7a6b')));
   if (isGhost) ctx.setLineDash([r * 0.4, r * 0.3]);
   ctx.stroke();
   ctx.setLineDash([]);
+  // The Company gets a second ring — at realm scale it must read as "the party
+  // is here" from across the room, not as one more coloured disc.
+  if (isParty(t) && !isGhost) {
+    ctx.beginPath(); ctx.arc(x, y, r * 1.18, 0, Math.PI * 2);
+    ctx.lineWidth = Math.max(1.5, r * 0.06); ctx.strokeStyle = '#ffcf5c';
+    ctx.stroke();
+  }
   // label (base name; the duplicate number is shown as a corner badge instead)
   ctx.globalAlpha = isGhost ? 0.7 : 1;
   ctx.fillStyle = '#fff';

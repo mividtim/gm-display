@@ -2,7 +2,7 @@
 // The GM side: token roster, per-map placement, rendering, controls.
 import { drawNoteMarkers, initCellNotes, notesOnMapChanged } from './cell-notes.js';
 import { rlEncode } from './games.js';
-import { TOKEN_FRAC, clamp01, drawMapGrid, isFlatHex, isHexKey, kCellH, kCellW, kRegularStepY, kStepY, kTokenDiam, mapDims, relMapSrc, snapNorm, tokenDisplayName, uid } from './geometry.js';
+import { TOKEN_SIDES, cellAtMapPx, cellLabel, clamp01, drawMapGrid, isFlatHex, isHexKey, isParty, kCellH, kCellW, kRegularStepY, kStepY, kTokenDiam, mapDims, relMapSrc, snapNorm, tokenClass, tokenDisplayName, tokenFrac, uid } from './geometry.js';
 import { setStatus } from './keyboard.js';
 import { ensureMarkerLoop } from './markers.js';
 import { parseHexColor } from './navigation.js';
@@ -134,7 +134,8 @@ function migrateLegacyTokens(campSlug, mapSrc) {
     const toks = Array.isArray(s.tokens) ? s.tokens : [];
     const defs = toks.map(t => ({
       id: t.id, base: t.base, num: t.num || 0, color: t.color, img: t.img || '',
-      side: t.side === 'pc' ? 'pc' : 'npc', owner: t.owner || '', ownerColor: t.ownerColor || ''
+      side: TOKEN_SIDES.includes(t.side) ? t.side : 'npc',
+      owner: t.owner || '', ownerColor: t.ownerColor || ''
     }));
     const placements = {};
     toks.forEach(t => {
@@ -167,7 +168,16 @@ function hydrateTokensForMap(src) {
   let pcIdx = 0;
   S.roster.forEach(d => {
     const p = placements[d.id];
-    if (d.side === 'pc') {
+    if (d.side === 'party') {
+      // The Company travels with the game, so it is on every map. It starts in
+      // the middle rather than the PC row — on a realm map that is roughly
+      // where a party begins, and it is never hiding under a portrait.
+      d.tx = p ? clamp01(p.tx) : 0.5;
+      d.ty = p ? clamp01(p.ty) : 0.5;
+      d.onMap = p ? !!p.onMap : true;
+      d.pending = null;
+      S.tokens.push(d);
+    } else if (d.side === 'pc') {
       // PCs are on every map. Default spot: staggered row near the bottom.
       d.tx = p ? clamp01(p.tx) : clamp01(0.15 + (pcIdx * 0.1) % 0.7);
       d.ty = p ? clamp01(p.ty) : 0.9;
@@ -264,6 +274,33 @@ export function createTokenFromForm() {
   onTokensChanged();
 }
 
+// The Company: the party as one piece. There is only ever one per campaign, so
+// the button either creates it or brings the existing one back onto this map.
+export function addCompanyToken() {
+  let t = S.roster.find(x => x.side === 'party');
+  if (!t) {
+    const nameEl = document.getElementById('tok-name');
+    const typed = ((nameEl && nameEl.value) || '').trim();
+    t = {
+      id: uid(), base: typed || 'The Company', num: 0,
+      // Always gold. The Company is identified by its double ring rather than
+      // by a colour a player might also be using.
+      color: '#d4a017',
+      img: (document.getElementById('tok-image') || {}).value || '',
+      side: 'party', tx: 0.5, ty: 0.5, onMap: true,
+      owner: '', ownerColor: '', pending: null,
+    };
+    const c = snapNorm(t.tx, t.ty);
+    t.tx = c.tx; t.ty = c.ty;
+    S.roster.push(t);
+    if (nameEl) nameEl.value = '';
+  }
+  if (!S.tokens.includes(t)) S.tokens.push(t);
+  t.onMap = true;
+  onTokensChanged();
+  setStatus(tokenDisplayName(t) + ' is on the map — drag it, or let a player propose the move');
+}
+
 // Add an existing roster NPC to the current map.
 function addRosterTokenToMap(id) {
   const d = S.roster.find(t => t.id === id);
@@ -287,7 +324,7 @@ function removeTokenFromMap(id) {
 
 export function duplicateToken(id) {
   const src = S.tokens.find(t => t.id === id);
-  if (!src) return;
+  if (!src || isParty(src)) return;      // there is only one Company
   const group = S.roster.filter(t => t.base === src.base);
   if (group.length === 1 && group[0].num === 0) group[0].num = 1; // first dupe numbers the original
   const maxNum = Math.max(0, ...group.map(t => t.num));
@@ -334,6 +371,15 @@ function rejectMove(id) {
   onTokensChanged();
 }
 
+// Where a token is standing, in your row,column notation. Empty when the map
+// has no calibration, because then a cell address would be a guess.
+export function cellHere(t) {
+  if (!t || !S.tokenGridEnabled) return '';
+  const { mw, mh } = mapDims();
+  if (!mw || !mh) return '';
+  return cellLabel(cellAtMapPx(t.tx * mw, t.ty * mh, mw, mh));
+}
+
 // ---- GM sidebar token list (current map's active set) ----
 export function renderTokenList() {
   const wrap = document.getElementById('token-list');
@@ -348,10 +394,17 @@ export function renderTokenList() {
     const sw = document.createElement('span');
     sw.style.cssText = 'width:14px;height:14px;border-radius:50%;flex:none;border:1px solid #000;background:' + (t.img ? '#444' : t.color);
     if (t.img) { sw.style.backgroundImage = 'url("' + t.img + '")'; sw.style.backgroundSize = 'cover'; }
+    if (isParty(t)) { sw.style.borderRadius = '3px'; sw.style.borderColor = '#ffcf5c'; }
     const label = document.createElement('span');
     label.style.cssText = 'flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
-    label.textContent = tokenDisplayName(t) + (t.owner ? '  ·  ' + t.owner : '');
-    label.title = t.owner ? ('Controlled by ' + t.owner) : (t.side === 'pc' ? 'Player token (unclaimed)' : 'NPC');
+    // On a keyed map the cell is the useful fact about a token — "The Company
+    // is on 5,5" is what you actually want to read off the list.
+    const where = S.tokenGridEnabled ? cellHere(t) : '';
+    label.textContent = tokenDisplayName(t)
+      + (where ? '  ·  ' + where : '')
+      + (t.owner ? '  ·  ' + t.owner : '');
+    label.title = isParty(t) ? 'The party, as one piece — any player may propose its move'
+      : (t.owner ? ('Controlled by ' + t.owner) : (t.side === 'pc' ? 'Player token (unclaimed)' : 'NPC'));
     row.append(sw, label);
     // Show/hide on this map — applies to PCs too (split party!). Sticks per map.
     const vis = mkMini(t.onMap ? '◉' : '○',
@@ -365,6 +418,7 @@ export function renderTokenList() {
     if (t.side === 'npc') {
       row.append(mkMini('✕', 'Remove from this map (stays in roster)', () => removeTokenFromMap(t.id)));
     }
+    if (isParty(t)) dup.remove();   // there is only one Company
     row.append(mkMini('🗑', 'Delete from roster (all maps)', () => deleteToken(t.id)));
     if (t.owner) { const rel = mkMini('⏏', 'Release claim', () => { t.owner = ''; t.ownerColor = ''; onTokensChanged(); }); row.append(rel); }
     wrap.appendChild(row);
@@ -588,9 +642,10 @@ export function renderGMTokens() {
   // Tokens belong to the MAP (projector) only. Never draw them while editing
   // fog on a sidecar handout (fogContext 'show') — that's the image display.
   if (S.currentMode !== 'fog' || S.fogContext !== 'map') return;
-  const sizePct = (kTokenDiam(S.mapWidth) / (S.mapWidth || 1)) * 100 * TOKEN_FRAC;
+  const unit = (kTokenDiam(S.mapWidth) / (S.mapWidth || 1)) * 100;
   // Draw only tokens the GM has made visible on this map (onMap is per-map).
   S.tokens.filter(t => t.onMap).forEach(t => {
+    const sizePct = unit * tokenFrac(t);
     // base token (solid) at its committed position
     layer.appendChild(makeTokenEl(t, t.tx, t.ty, sizePct, false, true));
     if (t.pending) {
@@ -611,7 +666,7 @@ export function renderGMTokens() {
 }
 function makeTokenEl(t, tx, ty, sizePct, isGhost, draggable) {
   const el = document.createElement('div');
-  el.className = 'token ' + (t.side === 'pc' ? 'pc' : 'npc') + (isGhost ? ' ghost' : '') + (draggable ? ' draggable' : '');
+  el.className = 'token ' + tokenClass(t) + (isGhost ? ' ghost' : '') + (draggable ? ' draggable' : '');
   el.style.left = (tx * 100) + '%';
   el.style.top = (ty * 100) + '%';
   el.style.width = sizePct + '%';
@@ -834,7 +889,8 @@ function saveTokens() {
   try {
     const defs = S.roster.map(t => ({
       id: t.id, base: t.base, num: t.num || 0, color: t.color, img: t.img || '',
-      side: t.side === 'pc' ? 'pc' : 'npc', owner: t.owner || '', ownerColor: t.ownerColor || ''
+      side: TOKEN_SIDES.includes(t.side) ? t.side : 'npc',
+      owner: t.owner || '', ownerColor: t.ownerColor || ''
     }));
     localStorage.setItem(campaignKey('roster'), JSON.stringify({
       roster: defs, tokenGridEnabled: S.tokenGridEnabled, tokenGridCells: S.tokenGridCells, tokenGridType: S.tokenGridType, tokenGridColor: S.tokenGridColor
