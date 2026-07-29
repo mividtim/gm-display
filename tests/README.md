@@ -8,7 +8,7 @@ refactor can be verified by diffing instead of by hoping.
     ...make changes...
     python3 tests/regress.py after.json baseline.json # capture + diff, exits 1 on drift
 
-70 probes covering: map-key geometry (square, both hex orientations, and the
+72 probes covering: map-key geometry (square, both hex orientations, and the
 anisotropic case) with a 2000-point fingerprint per shape; fog RLE round-trip
 and presets; crop maths including out-of-bounds overlap; token create,
 duplicate, snap, propose and approve; localStorage key naming; the exact shapes
@@ -217,3 +217,30 @@ Mutation-tested: truncating an icon path at the first space, dropping the HTML
 escape, and disabling the fit loop are each caught.
 
 `tests/make-legend-fixture.py` writes the `__parse__.png.legend.md` fixture.
+
+## realm.html is retired
+
+It was a second app living inside the first: one page for one map, with its own
+hex geometry, its own note store (`Mythic Bastionland/Hexes/`, one file per hex),
+its own token code and its own player build. Every one of those is now general —
+any map with a grid calibration has addressable cells, notes, party notes, a
+legend and tokens — so keeping it meant maintaining two of everything and fixing
+each bug twice.
+
+Removed: `realm.html`, `realm_api.py`, the four `realm_api` hook sites in
+`server.py`, and the remote redirect to `realm_player.html`, which had pointed
+at a file that no longer existed for some time.
+
+`/realm.html`, `/realm_player.html` and `/realm_data.json` now 301 to `/gm.html`,
+because a bookmark, a `gm://` link or a projector window left open from last
+session should land on the real thing rather than a 404. `realm.retired` and
+`realm.api.gone` assert both halves; dropping the redirect is caught.
+
+No data was migrated because there was none: the vault's `Hexes` folder was
+never created and no `realm_tokens.json` was ever written. The realm's prep
+lives in `Map Notes/MB Campaign 1 Realm (GM).png.md`, which the general notes
+system reads.
+
+Note `status_of()` — the retired API is checked from Python rather than from the
+page, because a 404 fetched in the browser writes a console error and
+`errors.gm` has to stay a real signal.

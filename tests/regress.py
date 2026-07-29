@@ -11,7 +11,7 @@ projector and to the server.
     python3 regress.py baseline.json          # capture
     python3 regress.py after.json baseline.json  # capture + diff
 """
-import asyncio, json, sys, urllib.request, math
+import asyncio, json, sys, urllib.request, urllib.error, math
 from playwright.async_api import async_playwright
 
 BASE = 'http://localhost:7680'
@@ -24,6 +24,18 @@ def cmd(action, file):
         BASE + '/api/command',
         data=json.dumps({'action': action, 'file': file}).encode(),
         headers={'Content-Type': 'application/json'}))
+
+
+def status_of(path):
+    """HTTP status for a path, without going through a browser tab — a 404
+    fetched in the page would write a console error and blunt errors.gm."""
+    try:
+        with urllib.request.urlopen(BASE + path) as r:
+            return r.status
+    except urllib.error.HTTPError as e:
+        return e.code
+    except Exception:
+        return 'unreachable'
 
 
 async def load_map(pg, path, wait=2600):
@@ -230,6 +242,23 @@ async def capture(pg, results):
                 html.includes('markup must stay text')];})()"""))
     await pg.evaluate("window.GMD.setLegendMap(relMapSrc(lastMapSrc))")
     await pg.wait_for_timeout(300)
+
+    # --- realm.html is retired ----------------------------------------------
+    # It was a whole second app for one map: its own hex geometry, note store
+    # and token code. All of that is general now, so the page is gone — but a
+    # bookmark, a gm:// link or a projector window left open from last session
+    # must still land somewhere sensible rather than on a 404.
+    put('realm.retired', await pg.evaluate("""(async () => {
+        const out = [];
+        for (const p of ['/realm.html', '/realm_player.html', '/realm_data.json']) {
+          const r = await fetch(p, {redirect: 'follow'});
+          out.push([p, r.redirected, new URL(r.url).pathname]);
+        }
+        return out;
+      })()"""))
+    # The retired API is checked from Python, not the page: a 404 fetched in the
+    # browser writes a console error, and errors.gm must stay a real signal.
+    put('realm.api.gone', [status_of('/api/realm/state'), status_of('/api/realm/')])
 
     # --- persistence keys ---------------------------------------------------
     put('storage.keys', await pg.evaluate("""[

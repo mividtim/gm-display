@@ -22,7 +22,6 @@ import signal
 import subprocess
 import time
 
-import realm_api  # Mythic Bastionland realm notes / marks / tokens
 import notes_api  # per-cell notes for any keyed map
 
 PORT = 7680
@@ -112,19 +111,18 @@ class GMHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
 
-        # --- Realm map API (hex notes in the vault, player marks, tokens) ---
-        if realm_api.handle_get(self, parsed):
-            return
-
-        # --- Cell notes for any keyed map ---
+        # --- Cell notes, party notes and legends for any keyed map ---
         if notes_api.handle_get(self, parsed):
             return
 
-        # The GM realm page has the myths, landmarks and barriers baked into it,
-        # and realm_data.json likewise. Remote visitors get the player build.
-        if parsed.path in ('/realm.html', '/realm_data.json') and self.is_remote():
-            self.send_response(302)
-            self.send_header('Location', '/realm_player.html')
+        # realm.html was a page that existed only for the Mythic Bastionland
+        # realm: its own hex geometry, its own note store, its own token code.
+        # Every part of it is now general — any map with a grid calibration has
+        # addressable cells, notes, a legend and tokens — so the page is gone
+        # and old bookmarks land on the real thing.
+        if parsed.path in ('/realm.html', '/realm_player.html', '/realm_data.json'):
+            self.send_response(301)
+            self.send_header('Location', '/gm.html')
             self.end_headers()
             return
 
@@ -290,11 +288,7 @@ class GMHandler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
 
-        # --- Realm map API (hex notes in the vault, player marks, tokens) ---
-        if realm_api.handle_post(self, parsed):
-            return
-
-        # --- Cell notes for any keyed map ---
+        # --- Cell notes, party notes and legends for any keyed map ---
         if notes_api.handle_post(self, parsed):
             return
 
@@ -630,11 +624,8 @@ def main():
         except PermissionError:
             print(f"⚠️  Cannot index {vault_root} (permission denied)")
 
-    # --- Realm map: hex notes live in the vault as markdown ---
-    try:
-        realm_api.init(vault_root)
-    except Exception as e:
-        print(f"⚠️  realm_api init failed: {e}")
+    # --- Notes, party notes, legends and shipped calibrations live in the
+    # vault as markdown beside the maps they belong to ---
     try:
         notes_api.init(vault_root)
     except Exception as e:

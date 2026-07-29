@@ -365,6 +365,27 @@
   }
  },
  "projection.scale": 100,
+ "realm.api.gone": [
+  404,
+  404
+ ],
+ "realm.retired": [
+  [
+   "/realm.html",
+   true,
+   "/gm.html"
+  ],
+  [
+   "/realm_player.html",
+   true,
+   "/gm.html"
+  ],
+  [
+   "/realm_data.json",
+   true,
+   "/gm.html"
+  ]
+ ],
  "remote.notes.controls": [
   true,
   true,
