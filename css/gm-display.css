@@ -466,7 +466,6 @@ body {
 #gm-note-tip code { background: #2a2a30; padding: 0 3px; border-radius: 3px; }
 #gm-note-tip .nt-party { margin-top: 4px; color: #cfd6e0; }
 #gm-note-tip .nt-party b { color: #60a5fa; font-weight: 700; }
-#gm-note-tip .nt-empty { color: #888; font-style: italic; }
 
 #gm-note-pop {
   position: fixed; display: none; z-index: 401;

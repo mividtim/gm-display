@@ -47,8 +47,15 @@ function saveNote(cell, text) {
         body: JSON.stringify({ map: currentMap(), cell, text }),
       });
       if (!r.ok) throw new Error(r.status);
-      if (text.trim()) notes[cell] = text; else delete notes[cell];
-      setNoteStatus('saved to your vault');
+      const emptied = !text.trim();
+      if (emptied) delete notes[cell]; else notes[cell] = text;
+      setNoteStatus(emptied ? 'note removed' : 'saved to your vault');
+      // An emptied note is a deleted one — it should not leave an editor open
+      // on a cell that no longer has anything, or a selection ring on it.
+      if (emptied) {
+        if (selectedCell === cell) selectedCell = null;
+        closeNotePop();
+      }
       drawNoteMarkers(); renderNotesList();
     } catch (e) { setNoteStatus('not saved — is the server running?'); }
   }, 600);
@@ -174,11 +181,11 @@ function showTipAt(label, cx, cy) {
   // a stray mousemove must not resurrect one behind the popover.
   if (notePopOpen()) { hideTip(); return; }
   const body = noteSummary(label);
-  // With nothing written here there is nothing to peek at — except in Notes
-  // mode, where the label tells you which cell you are about to write on.
-  if (!body && !notesMode()) { hideTip(); return; }
-  tip.innerHTML = body || '<div class="nt-cell">' + esc(label) + '</div>'
-    + '<div class="nt-empty">no notes — click to write one</div>';
+  // Nothing written here means nothing to show. A tooltip that says "no notes"
+  // follows the cursor across every blank cell on the map and tells you
+  // something you already knew; the toolbar hint covers what Notes does.
+  if (!body) { hideTip(); return; }
+  tip.innerHTML = body;
   tip.style.display = 'block';
   // Keep it on screen: flip to the other side of the cursor near an edge.
   const r = tip.getBoundingClientRect();

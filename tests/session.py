@@ -327,7 +327,76 @@ async def main():
         check(fill and fill[0] < 0.5, 'the Company fill is see-through', json.dumps(fill))
         check(fill and fill[1] == 1, 'its ring and label stay solid', json.dumps(fill))
 
-        print('\n11. No JS errors anywhere')
+        print('\n11. An emptied note is a deleted note')
+        cmd('map', MAP)
+        await gm.wait_for_timeout(3000)
+        read = """(async () => {
+            const G = window.GMD;
+            const d = await (await fetch('/api/notes?map=' + encodeURIComponent(
+              G.relMapSrc(G.S.lastMapSrc)), {cache: 'no-store'})).json();
+            return { count: G.notesCount(),
+                     server: Object.keys(d.cells).sort(),
+                     rows: document.querySelectorAll('#note-list [data-cell]').length,
+                     pop: G.notePopOpen() }; })()"""
+        typeIn = lambda v: gm.evaluate(
+            "(v) => { const ta = document.getElementById('note-pop-text');"
+            "  ta.value = v; ta.dispatchEvent(new Event('input')); }", v)
+
+        base = await gm.evaluate(read)
+        await gm.evaluate("window.GMD.openNoteAt('7,3', 500, 400)")
+        await gm.wait_for_timeout(300)
+        await typeIn('Boot prints.')
+        await gm.wait_for_timeout(1500)
+        wrote = await gm.evaluate(read)
+        check('7,3' in wrote['server'] and wrote['count'] == base['count'] + 1,
+              'writing a note adds it', json.dumps(wrote))
+
+        await typeIn('')
+        await gm.wait_for_timeout(1600)
+        gone = await gm.evaluate(read)
+        check('7,3' not in gone['server'], 'emptying it removes it from the vault',
+              json.dumps(gone))
+        check(gone['rows'] == base['rows'], 'and from the note index', json.dumps(gone))
+        check(gone['pop'] is False, 'and closes the editor rather than sitting on nothing')
+
+        # Whitespace is empty too.
+        await gm.evaluate("window.GMD.openNoteAt('7,4', 500, 400)")
+        await gm.wait_for_timeout(300)
+        await typeIn('Something')
+        await gm.wait_for_timeout(1500)
+        await typeIn('   \n  \t\n ')
+        await gm.wait_for_timeout(1600)
+        ws = await gm.evaluate(read)
+        check('7,4' not in ws['server'], 'whitespace counts as empty', json.dumps(ws))
+
+        # Hovering a cell with nothing written must show nothing at all.
+        await gm.click('#tool-bar [data-tool="notes"]')
+        await gm.wait_for_timeout(300)
+        pt = await gm.evaluate("""(() => {
+            const G = window.GMD;
+            const r = document.getElementById('gm-canvas-wrap').getBoundingClientRect();
+            const m = G.cellCenterMapPx(G.cellFromLabel('7,3'), G.S.mapWidth, G.S.mapHeight);
+            return {x: r.left + m.x / G.S.mapWidth * r.width,
+                    y: r.top + m.y / G.S.mapHeight * r.height}; })()""")
+        await gm.mouse.move(pt['x'], pt['y'])
+        await gm.wait_for_timeout(500)
+        check(await gm.evaluate(
+            "getComputedStyle(document.getElementById('gm-note-tip')).display") == 'none',
+            'no tooltip on a cell with nothing written')
+        # ...but a cell that does have one still peeks.
+        pt2 = await gm.evaluate("""(() => {
+            const G = window.GMD;
+            const r = document.getElementById('gm-canvas-wrap').getBoundingClientRect();
+            const m = G.cellCenterMapPx(G.cellFromLabel('4,6'), G.S.mapWidth, G.S.mapHeight);
+            return {x: r.left + m.x / G.S.mapWidth * r.width,
+                    y: r.top + m.y / G.S.mapHeight * r.height}; })()""")
+        await gm.mouse.move(pt2['x'], pt2['y'])
+        await gm.wait_for_timeout(500)
+        check(await gm.evaluate(
+            "getComputedStyle(document.getElementById('gm-note-tip')).display") == 'block',
+            'a cell that has a note still peeks')
+
+        print('\n12. No JS errors anywhere')
         errs = [e for e in errs if 'favicon' not in e and 'willReadFrequently' not in e]
         check(not errs, 'clean console on both pages', '; '.join(errs[:3]))
 

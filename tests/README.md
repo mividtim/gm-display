@@ -366,3 +366,20 @@ that matters most.
 A player's marker line is the colour of the token they are playing, resolved at
 draw time rather than at join time — so it stays right if the GM recolours the
 token mid-session, and it is always obvious who is drawing.
+
+## An emptied note is a deleted note
+
+Clearing a cell's text removes the note — from the vault file, the note index,
+the pip on the map, and the selection. The editor closes rather than sitting
+open on a cell that no longer has anything, and the status says "note removed"
+rather than "saved to your vault", which was actively misleading. Whitespace
+counts as empty.
+
+The hover tooltip now appears only when there is something written. It used to
+show "no notes — click to write one" on every blank cell, which meant a box
+following the cursor across the whole map telling the GM something they could
+already see. The toolbar hint covers what the Notes tool does.
+
+`session.py` step 11 writes a note, empties it, and checks all four places it
+should vanish from — then hovers an empty cell and asserts no tooltip, and
+hovers a noted one and asserts there is.
