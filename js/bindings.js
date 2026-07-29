@@ -17,7 +17,7 @@ import { addArtFromVault, refreshArtVaultOptions } from './per-map-store.js';
 import { nudgeCorner, resetCorner, resetProjection, rotateBy, setBg, setGridColor, setRotation, toggleGrid, toggleTestPattern, updateGridOpacity, updateGridSize, updateScale } from './projection.js';
 import { remoteChangeCharacter, remoteToggleLegend, remoteToggleMarker, remoteToggleNotes } from './remote-page.js';
 import { fogRedo, fogUndo, hideAll, revealAll, toggleSidebarCollapsed } from './sidebar.js';
-import { addCompanyToken, addRosterTokenFromSelect, createTokenFromForm, nudgeKeyCell, nudgeKeyCellY, nudgeKeyOrigin, refreshTokenImageOptions, resetMapKey, setKeyAcross, setKeyCell, setKeyCellY, setKeyOx, setKeyOy, setKeyShape, setTokenGridColor, toggleKeyLink, toggleMarkerMode, toggleTokenGrid } from './tokens.js';
+import { addCompanyToken, addRosterTokenFromSelect, createTokenFromForm, nudgeKeyCell, nudgeKeyCellY, nudgeKeyOrigin, refreshTokenImageOptions, resetMapKey, setKeyAcross, setKeyCell, setKeyCellY, setKeyOx, setKeyOy, setKeyShape, setTokenGridColor, setTokenOpacity, toggleKeyLink, toggleMarkerMode, toggleTokenGrid } from './tokens.js';
 const unbound = [];
 let bound = 0;
 
@@ -129,6 +129,7 @@ export function attachGmBindings() {
   bind('[data-act="b63"]', 'click', () => { refreshTokenImageOptions(); });
   bind('[data-act="b64"]', 'click', () => { createTokenFromForm(); });
   bind('#btn-company', 'click', () => { addCompanyToken(); });
+  bind('#tok-opacity', 'input', (_e, el) => { setTokenOpacity(el.value / 100); });
   bind('#btn-legend-show', 'click', () => { toggleLegendOnProjector(); });
   bind('#btn-legend-start', 'click', () => { startLegendFromButton(); });
   bind('[data-act="b65"]', 'click', () => { addRosterTokenFromSelect(); });

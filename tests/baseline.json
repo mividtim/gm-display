@@ -518,7 +518,7 @@
   "P"
  ],
  "ui.bindings": [
-  109,
+  110,
   []
  ],
  "ui.controls": [
@@ -640,6 +640,8 @@
   "tok-color",
   "tok-image",
   "tok-name",
+  "tok-opacity",
+  "tok-opacity-val",
   "tok-roster-add",
   "tok-roster-row",
   "tok-side",
@@ -696,6 +698,7 @@
   "ox": 17,
   "oy": 9,
   "show": true,
+  "tokenOpacity": 0.62,
   "type": "square"
  },
  "wire.playerstate.keys": [

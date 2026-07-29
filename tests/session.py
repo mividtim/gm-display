@@ -209,7 +209,125 @@ async def main():
         check('realm-sheet.png' in panel,
               'an unnoted map names itself rather than going silent', panel[:80])
 
-        print('\n8. No JS errors anywhere')
+        print('\n8. The tool strip: one tool at a time, and only that tool')
+        cmd('map', MAP)
+        await gm.wait_for_timeout(3000)
+        check(await gm.evaluate(
+            "getComputedStyle(document.getElementById('tool-bar')).display") != 'none',
+            'the tool strip is on the map')
+        # Exactly one lit, and every layer derived from it.
+        async def pick(tool):
+            await gm.click(f'#tool-bar [data-tool="{tool}"]')
+            await gm.wait_for_timeout(350)
+            return await gm.evaluate("""(() => {
+                const ce = id => { const e = document.getElementById(id);
+                  return e ? getComputedStyle(e).pointerEvents : 'missing'; };
+                return {
+                  lit: [...document.querySelectorAll('#tool-bar .tool-btn.active')]
+                         .map(b => b.dataset.tool),
+                  fog: ce('gm-fog-canvas'),
+                  marker: ce('gm-marker-canvas'),
+                  notes: ce('gm-notes-layer'),
+                  tokensLive: !document.getElementById('gm-token-layer')
+                                .classList.contains('markerblock'),
+                }; })()""")
+
+        for tool, want in [
+            ('none',   dict(fog='none', marker='none', notes='none', tokensLive=False)),
+            ('reveal', dict(fog='auto', marker='none', notes='none', tokensLive=False)),
+            ('hide',   dict(fog='auto', marker='none', notes='none', tokensLive=False)),
+            ('tokens', dict(fog='none', marker='none', notes='none', tokensLive=True)),
+            ('notes',  dict(fog='none', marker='none', notes='auto', tokensLive=False)),
+            ('marker', dict(fog='none', marker='auto', notes='none', tokensLive=False)),
+        ]:
+            got = await pick(tool)
+            ok = (got['lit'] == [tool]
+                  and all(got[k] == v for k, v in want.items()))
+            check(ok, f'{tool}: exactly one tool lit, only its layer live', json.dumps(got))
+
+        # Keyboard reaches the same place.
+        await gm.click('#gm-canvas-wrap', position={'x': 5, 'y': 5}, force=True)
+        for key, tool in [('r', 'reveal'), ('v', 'tokens'), ('n', 'notes'), ('m', 'marker')]:
+            await gm.keyboard.press(key)
+            await gm.wait_for_timeout(200)
+            check(await gm.evaluate("window.GMD.S.activeTool") == tool,
+                  f'key {key} selects {tool}')
+        # Escape steps out rather than jumping home.
+        await gm.keyboard.press('Escape')
+        await gm.wait_for_timeout(250)
+        check(await gm.evaluate("window.GMD.S.activeTool") == 'none',
+              'Escape drops to None')
+        check(await gm.evaluate("window.GMD.S.currentMode") == 'fog',
+              'Escape did not leave the map')
+        # Picking a tool opens its settings.
+        await gm.evaluate("document.querySelectorAll('details.sb-section')"
+                          ".forEach(d => d.open = false)")
+        await gm.click('#tool-bar [data-tool="notes"]')
+        await gm.wait_for_timeout(400)
+        check(await gm.evaluate(
+            "document.getElementById('section-notes').open"),
+            'picking Notes opens the Notes section')
+
+        print('\n9. Painting fog actually paints — the core loop')
+        cmd('map', MAP)
+        await gm.wait_for_timeout(3000)
+        # Step 8 collapsed every section. Picking a fog tool is what should
+        # bring Fog Tools back — which is the feature, so use it.
+        await gm.click('#tool-bar [data-tool="reveal"]')
+        await gm.wait_for_timeout(400)
+        check(await gm.evaluate("""(() => { const b =
+            document.querySelector('[data-act=\"b14\"]');
+            return !!(b && b.offsetParent); })()"""),
+              'picking a fog tool brings Hide All back into view')
+        await gm.click('[data-act="b14"]')          # Hide All
+        await gm.wait_for_timeout(1200)
+        before = await pj.evaluate(LIT)
+        await gm.click('#tool-bar [data-tool="reveal"]')
+        await gm.wait_for_timeout(300)
+        box = await gm.evaluate("""(() => { const r = document.getElementById(
+            'gm-canvas-wrap').getBoundingClientRect();
+            return {x: r.left, y: r.top, w: r.width, h: r.height}; })()""")
+        await gm.mouse.move(box['x'] + box['w'] * 0.35, box['y'] + box['h'] * 0.4)
+        await gm.mouse.down()
+        for i in range(1, 9):
+            await gm.mouse.move(box['x'] + box['w'] * (0.35 + i * 0.03),
+                                box['y'] + box['h'] * 0.4)
+        await gm.mouse.up()
+        await gm.wait_for_timeout(1500)
+        after = await pj.evaluate(LIT)
+        check(after > before, 'dragging with Reveal paints fog away on the projector',
+              f'{before}% -> {after}%')
+        # ...and the same drag under a non-fog tool must do nothing
+        await gm.click('#tool-bar [data-tool="none"]')
+        await gm.wait_for_timeout(300)
+        held = await pj.evaluate(LIT)
+        await gm.mouse.move(box['x'] + box['w'] * 0.6, box['y'] + box['h'] * 0.7)
+        await gm.mouse.down()
+        for i in range(1, 9):
+            await gm.mouse.move(box['x'] + box['w'] * (0.6 + i * 0.03),
+                                box['y'] + box['h'] * 0.7)
+        await gm.mouse.up()
+        await gm.wait_for_timeout(1200)
+        check(await pj.evaluate(LIT) == held,
+              'the same drag under None changes nothing')
+
+        print('\n10. Tokens mark their cell without hiding it')
+        await gm.evaluate("""(() => {
+            const G = window.GMD;
+            G.S.roster = []; G.S.tokens = [];
+            G.addCompanyToken(); })()""")
+        await gm.wait_for_timeout(500)
+        fill = await gm.evaluate("""(() => {
+            const f = document.querySelector('#gm-token-layer .token.party .tok-fill');
+            const el = document.querySelector('#gm-token-layer .token.party');
+            if (!f || !el) return null;
+            return [ +getComputedStyle(f).opacity,
+                     +getComputedStyle(el).opacity,
+                     getComputedStyle(el).borderTopWidth ]; })()""")
+        check(fill and fill[0] < 0.5, 'the Company fill is see-through', json.dumps(fill))
+        check(fill and fill[1] == 1, 'its ring and label stay solid', json.dumps(fill))
+
+        print('\n11. No JS errors anywhere')
         errs = [e for e in errs if 'favicon' not in e and 'willReadFrequently' not in e]
         check(not errs, 'clean console on both pages', '; '.join(errs[:3]))
 

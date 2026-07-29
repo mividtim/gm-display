@@ -27,6 +27,11 @@ S.tokenGridShow = true;      // ...and draw the lines (off for maps with a print
 S.tokenGridCells = 24;
 S.tokenGridType = 'square';    // 'square' | 'hex' (pointy-top)
 S.tokenGridColor = 'rgba(120,200,255,0.5)';  // grid line color (rgba)
+// How solid a token's fill is. A token has to mark its cell without hiding
+// what is drawn in it — on a realm hex the art IS the information. The ring,
+// the initials and the label stay fully opaque; only the fill fades, so the
+// token still reads at a glance while the hex shows through.
+S.tokenOpacity = 0.62;
 // --- Map key: per-map grid calibration -----------------------------------
 // The old model could only say "N cells across the map width", with the grid
 // origin welded to map pixel (0,0). That can't line up with a grid already

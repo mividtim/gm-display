@@ -497,6 +497,12 @@
       <!-- Token list (tokens on the current map) -->
       <div id="token-list" style="display:flex;flex-direction:column;gap:3px;max-height:240px;overflow:auto;margin-bottom:8px;"></div>
 
+      <!-- A token has to mark its cell without hiding what is drawn in it. -->
+      <label>Token fill: <span class="val" id="tok-opacity-val">62%</span></label>
+      <input type="range" id="tok-opacity" min="10" max="100" step="2" value="62"
+             title="How solid the token's fill is. The ring, initials and label always stay solid.">
+
+
 
       <!-- Marker / laser -->
       <div style="border-top:1px solid #333;padding-top:6px;margin-top:6px;">
@@ -538,6 +544,9 @@
   </div>
 
   <div id="view-fog" class="main-view">
+    <!-- What a click or drag on the map does. One tool at a time; this is the
+         only place that answers that question. -->
+    <div id="tool-bar"></div>
     <div id="gm-canvas-container">
       <div id="gm-canvas-wrap">
         <canvas id="gm-map-canvas"></canvas>

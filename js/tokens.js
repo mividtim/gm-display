@@ -1,6 +1,6 @@
 // GM Display — tokens.js
 // The GM side: token roster, per-map placement, rendering, controls.
-import { drawNoteMarkers, initCellNotes, notesOnMapChanged } from './cell-notes.js';
+import { drawNoteMarkers, initCellNotes, notesOnMapChanged, notesToolChanged } from './cell-notes.js';
 import { rlEncode } from './games.js';
 import { TOKEN_SIDES, cellAtMapPx, cellLabel, clamp01, drawMapGrid, isFlatHex, isHexKey, isParty, kCellH, kCellW, kRegularStepY, kStepY, kTokenDiam, mapDims, relMapSrc, snapNorm, tokenClass, tokenDisplayName, tokenFrac, uid } from './geometry.js';
 import { setStatus } from './keyboard.js';
@@ -9,6 +9,7 @@ import { ensureMarkerLoop } from './markers.js';
 import { parseHexColor } from './navigation.js';
 import { campaignKey, gameKey } from './state.js';
 import { S } from './store.js';
+import { initTools, isTool, onToolChanged, setActiveTool } from './tools.js';
 // ===================================================================
 // GM SIDE
 // ===================================================================
@@ -238,6 +239,15 @@ export function initTokensGM() {
   applySavedMapKey(S.lastMapSrc);
   initCellNotes();
   initLegendGM();
+  // One tool at a time. Every mode-ish thing above hangs off this now, so it
+  // is initialised after them and drives them, not the other way round.
+  onToolChanged(() => { notesToolChanged(); markerToolChanged(); });
+  initTools();
+  notesToolChanged(); markerToolChanged();
+  const op = document.getElementById('tok-opacity');
+  if (op) { op.value = Math.round((S.tokenOpacity || 0.62) * 100);
+            const ov = document.getElementById('tok-opacity-val');
+            if (ov) ov.textContent = op.value + '%'; }
   syncKeyPanel();
   attachKeyNudgeKeys();
   pushTokensToServer();
@@ -683,8 +693,17 @@ function makeTokenEl(t, tx, ty, sizePct, isGhost, draggable) {
   el.style.width = sizePct + '%';
   el.style.aspectRatio = '1';
   el.style.height = 'auto';
-  if (t.img) { el.style.backgroundImage = 'url("' + t.img + '")'; }
-  else { el.style.background = t.color; el.textContent = initialsOf(t.base); }
+  // The fill is its own layer: fading the element would fade the ring and the
+  // initials with it, and those are what make the token readable.
+  const fill = document.createElement('span');
+  fill.className = 'tok-fill';
+  fill.style.opacity = tokenFillOpacity(t);
+  if (t.img) { fill.style.backgroundImage = 'url("' + t.img + '")'; }
+  else { fill.style.background = t.color; }
+  el.appendChild(fill);
+  if (!t.img) { const ini = document.createElement('span');
+                ini.className = 'tok-ini'; ini.textContent = initialsOf(t.base);
+                el.appendChild(ini); }
   if (!isGhost && t.ownerColor) el.style.borderColor = t.ownerColor;
   const lab = document.createElement('span');
   lab.className = 'tok-label';
@@ -694,6 +713,21 @@ function makeTokenEl(t, tx, ty, sizePct, isGhost, draggable) {
   if (draggable) attachGmTokenDrag(el, t, isGhost);
   return el;
 }
+// The Company is the biggest piece on the board and sits on a hex whose art
+// matters most, so it fades further than a figure does — it reads as a ring
+// around the hex rather than a lid on it.
+export function tokenFillOpacity(t) {
+  const base = (typeof S.tokenOpacity === 'number') ? S.tokenOpacity : 0.62;
+  return isParty(t) ? Math.max(0.12, base * 0.55) : base;
+}
+
+export function setTokenOpacity(v) {
+  S.tokenOpacity = Math.max(0.1, Math.min(1, parseFloat(v) || 0.62));
+  const out = document.getElementById('tok-opacity-val');
+  if (out) out.textContent = Math.round(S.tokenOpacity * 100) + '%';
+  renderGMTokens(); broadcastTokens(); pushTokensToServer(); saveTokens();
+}
+
 export function initialsOf(name) {
   return (name || '?').split(/\s+/).map(w => w[0]).join('').slice(0, 3).toUpperCase();
 }
@@ -747,22 +781,27 @@ function drawGMGrid() {
 }
 
 // ---- GM marker drawing ----
+// The laser is a tool now. This button and the toolbar pick the same one.
 export function toggleMarkerMode() {
-  S.markerMode = !S.markerMode;
-  S.markerColor = document.getElementById('marker-color').value;
-  document.getElementById('marker-status').textContent = S.markerMode ? 'ON' : 'OFF';
-  document.getElementById('btn-marker').classList.toggle('active', S.markerMode);
-  const mc = document.getElementById('gm-marker-canvas');
-  if (mc) mc.style.pointerEvents = S.markerMode ? 'auto' : 'none';
-  const layer = document.getElementById('gm-token-layer');
-  if (layer) layer.classList.toggle('markerblock', S.markerMode);
+  setActiveTool(isTool('marker') ? 'tokens' : 'marker');
+}
+
+// Called by tools.js whenever the active tool changes.
+export function markerToolChanged() {
+  const on = isTool('marker');
+  const ci = document.getElementById('marker-color');
+  if (ci) S.markerColor = ci.value;
+  const st = document.getElementById('marker-status');
+  if (st) st.textContent = on ? 'ON' : 'OFF';
+  const b = document.getElementById('btn-marker');
+  if (b) b.classList.toggle('active', on);
 }
 function attachGmMarkerHandlers() {
   const mc = document.getElementById('gm-marker-canvas');
   if (!mc) return;
   const box = () => mc.getBoundingClientRect();
   mc.addEventListener('pointerdown', (e) => {
-    if (!S.markerMode) return;
+    if (!isTool('marker')) return;
     mc.setPointerCapture(e.pointerId);
     const b = box();
     S.markerColor = document.getElementById('marker-color').value;
@@ -835,6 +874,7 @@ export function applyPlayerAction(a) {
 export function gridWirePayload() {
   return {
     enabled: S.tokenGridEnabled, show: S.tokenGridShow, cells: S.tokenGridCells,
+    tokenOpacity: S.tokenOpacity,
     type: S.tokenGridType, color: S.tokenGridColor,
     cell: S.keyCellPx, cellY: S.keyCellYPx, ox: S.keyOx, oy: S.keyOy
   };
@@ -844,6 +884,7 @@ export function applyGridWire(g) {
   S.tokenGridEnabled = !!g.enabled;
   // Older senders have no `show`; a missing one means "draw it", as before.
   S.tokenGridShow = (g.show === undefined) ? true : !!g.show;
+  if (typeof g.tokenOpacity === 'number') S.tokenOpacity = g.tokenOpacity;
   S.tokenGridCells = g.cells || 24;
   S.tokenGridType = g.type || 'square';
   if (g.color) S.tokenGridColor = g.color;
@@ -907,6 +948,7 @@ function saveTokens() {
     }));
     localStorage.setItem(campaignKey('roster'), JSON.stringify({
       roster: defs, tokenGridEnabled: S.tokenGridEnabled, tokenGridShow: S.tokenGridShow,
+      tokenOpacity: S.tokenOpacity,
       tokenGridCells: S.tokenGridCells, tokenGridType: S.tokenGridType, tokenGridColor: S.tokenGridColor
     }));
     const placements = {};
@@ -926,6 +968,7 @@ export function loadTokens() {
       S.roster.forEach(t => { t.pending = null; if (t.owner === undefined) t.owner = ''; });
       if (typeof s.tokenGridEnabled === 'boolean') S.tokenGridEnabled = s.tokenGridEnabled;
       if (typeof s.tokenGridShow === 'boolean') S.tokenGridShow = s.tokenGridShow;
+      if (typeof s.tokenOpacity === 'number') S.tokenOpacity = s.tokenOpacity;
       if (s.tokenGridCells) S.tokenGridCells = s.tokenGridCells;
       S.tokenGridType = ['hex', 'hexflat'].includes(s.tokenGridType) ? s.tokenGridType : 'square';
       if (s.tokenGridColor) S.tokenGridColor = s.tokenGridColor;

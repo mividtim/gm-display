@@ -3,7 +3,7 @@
 import { drawMapGrid, isParty, kTokenDiam, tokenFrac } from './geometry.js';
 import { ensureMarkerLoop } from './markers.js';
 import { S } from './store.js';
-import { applyGridWire } from './tokens.js';
+import { applyGridWire, tokenFillOpacity } from './tokens.js';
 // ===================================================================
 // PROJECTOR (BroadcastChannel mirror) — draws tokens + grid + markers
 // onto canvases INSIDE #player-canvas-wrap so the keystone warp applies.
@@ -55,15 +55,22 @@ function drawTokenCircle(ctx, x, y, r, t, isGhost) {
   if (isGhost) ctx.globalAlpha = 0.5;
   ctx.beginPath();
   ctx.arc(x, y, r, 0, Math.PI * 2);
+  // Fill only — the ring and the label below are drawn at full strength, so
+  // the token marks its cell without covering what is drawn in it.
+  const fillA = tokenFillOpacity(t);
   if (t.img && projTokenImg(t.img)) {
     ctx.save(); ctx.clip();
+    ctx.globalAlpha = (isGhost ? 0.5 : 1) * fillA;
     const im = projTokenImg(t.img);
     ctx.drawImage(im, x - r, y - r, r * 2, r * 2);
     if (isGhost) { ctx.globalCompositeOperation = 'saturation'; ctx.fillStyle = '#888'; ctx.fillRect(x - r, y - r, r * 2, r * 2); }
     ctx.restore();
   } else {
+    ctx.save();
+    ctx.globalAlpha = (isGhost ? 0.5 : 1) * fillA;
     ctx.fillStyle = isGhost ? '#9aa' : t.color;
     ctx.fill();
+    ctx.restore();
   }
   ctx.lineWidth = Math.max(2, r * (isParty(t) ? 0.16 : 0.12));
   ctx.strokeStyle = isGhost ? '#cfd6e0'

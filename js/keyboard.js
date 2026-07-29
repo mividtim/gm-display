@@ -2,13 +2,15 @@
 // Keyboard shortcuts.
 // Classic script: load order matters (see gm_display.html).
 // === Keyboard Shortcuts ===
+import { closeNotePop, notePopOpen } from './cell-notes.js';
 import { cropFill, cropFit, toggleCropPanel, toggleProjectionPanel, toggleTextPanel } from './crop.js';
-import { setTool, syncNow, toggleLiveSync, updateBrushPreview } from './fog-presets.js';
+import { syncNow, toggleLiveSync, updateBrushPreview } from './fog-presets.js';
 import { renderGMImage } from './fog.js';
 import { goHome } from './navigation.js';
 import { rotateBy, toggleGrid } from './projection.js';
 import { fogRedo, fogUndo } from './sidebar.js';
 import { S } from './store.js';
+import { setActiveTool } from './tools.js';
 document.addEventListener('keydown', (e) => {
   if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
   // Undo/Redo: Cmd+Z / Cmd+Shift+Z (Mac) or Ctrl+Z / Ctrl+Shift+Z
@@ -21,9 +23,14 @@ document.addEventListener('keydown', (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key === 'y' && S.currentMode === 'fog') {
     e.preventDefault(); fogRedo(); return;
   }
-  if (e.key === 'Escape') goHome();
-  if (e.key === 'r') setTool('reveal');
-  if (e.key === 'h') setTool('hide');
+  // Escape gets you out of whatever you are in, one step at a time: close an
+  // open note, then drop to the None tool, and only then leave the map.
+  if (e.key === 'Escape') {
+    if (notePopOpen()) { closeNotePop(); return; }
+    if (S.activeTool !== 'none') { setActiveTool('none'); return; }
+    goHome();
+    return;
+  }
   if (e.key === 't') toggleTextPanel();
   if (e.key === 'p') toggleProjectionPanel();
   if (e.key === 'c' && (S.currentMode === 'fog' || S.currentMode === 'image')) toggleCropPanel();

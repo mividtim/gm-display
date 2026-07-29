@@ -9,7 +9,7 @@
 import { cellAtMapPx, cellCenterMapPx, cellFromLabel, cellLabel, kStepX, kStepY, mapDims, relMapSrc } from './geometry.js';
 import { onPartyNotesChanged, partyNoteCount, partyNotes, partyNotesFor, setPartyNotesMap, startPartyNotesPolling } from './party-notes.js';
 import { S } from './store.js';
-let notesMode = false;
+import { isTool, setActiveTool } from './tools.js';
 let selectedCell = null;          // label string, e.g. "5,5"
 let notes = {};                   // label -> text
 let noteFile = '';
@@ -55,18 +55,23 @@ function saveNote(cell, text) {
 }
 
 // ------------------------------------------------------------------- mode ---
+// Notes is a tool now, not a mode of its own. The sidebar button and the
+// toolbar button are two ways to pick the same one.
+const notesMode = () => isTool('notes');
+
 export function toggleNotesMode() {
-  notesMode = !notesMode;
-  const layer = el('gm-notes-layer');
-  if (layer) layer.style.pointerEvents = notesMode ? 'auto' : 'none';
+  setActiveTool(isTool('notes') ? 'tokens' : 'notes');
+}
+
+// Called by tools.js whenever the active tool changes.
+export function notesToolChanged() {
   const b = el('btn-notes-mode');
-  if (b) b.classList.toggle('active', notesMode);
+  if (b) b.classList.toggle('active', notesMode());
   const st = el('notes-mode-status');
-  if (st) st.textContent = notesMode ? 'ON' : 'OFF';
-  const tl = el('gm-token-layer');
-  if (tl) tl.classList.toggle('markerblock', notesMode);
-  drawNoteMarkers();          // your pips appear with the mode and go with it
-  if (notesMode) loadNotes();
+  if (st) st.textContent = notesMode() ? 'ON' : 'OFF';
+  if (!notesMode()) { closeNotePop(); hideTip(); }
+  drawNoteMarkers();          // your pips appear with the tool and go with it
+  if (notesMode()) loadNotes();
 }
 
 function attachNotesLayer() {
@@ -171,7 +176,7 @@ function showTipAt(label, cx, cy) {
   const body = noteSummary(label);
   // With nothing written here there is nothing to peek at — except in Notes
   // mode, where the label tells you which cell you are about to write on.
-  if (!body && !notesMode) { hideTip(); return; }
+  if (!body && !notesMode()) { hideTip(); return; }
   tip.innerHTML = body || '<div class="nt-cell">' + esc(label) + '</div>'
     + '<div class="nt-empty">no notes — click to write one</div>';
   tip.style.display = 'block';
@@ -191,7 +196,7 @@ function attachMapHover() {
   wrap.addEventListener('mousemove', (e) => {
     // Never while a drag is in flight: painting fog or moving a token is not
     // the moment to be shown a tooltip.
-    if (e.buttons || S.markerMode) { hideTip(); return; }
+    if (e.buttons || isTool('marker')) { hideTip(); return; }
     if (hoverRaf) return;
     hoverRaf = requestAnimationFrame(() => {
       hoverRaf = 0;
@@ -317,10 +322,10 @@ export function drawNoteMarkers() {
   // hex carries prep, and 144 gold dots over the art tell you nothing during
   // play. What the party wrote is always shown: that is news, and there is
   // never much of it.
-  if (notesMode) {
+  if (notesMode()) {
     for (const label of Object.keys(notes)) pip(label, 'rgba(255,203,84,0.92)', party[label] ? -r : 0);
   }
-  for (const label of Object.keys(party)) pip(label, 'rgba(96,165,250,0.95)', (notesMode && notes[label]) ? r : 0);
+  for (const label of Object.keys(party)) pip(label, 'rgba(96,165,250,0.95)', (notesMode() && notes[label]) ? r : 0);
   if (selectedCell) {
     const cell = cellFromLabel(selectedCell);
     if (cell) {
@@ -370,7 +375,7 @@ function renderNotesPanel() {
   if (!body) return;
   if (!selectedCell) {
     body.innerHTML = '<div style="color:#888;font-size:11px;">'
-      + (notesMode ? 'Click a cell on the map.' : 'Turn Notes mode on, then click a cell.')
+      + (notesMode() ? 'Click a cell on the map.' : 'Pick the Notes tool, then click a cell.')
       + '</div>';
   } else {
     body.innerHTML =
@@ -455,4 +460,4 @@ export function notesOnMapChanged() {
 
 export function notesCount() { return Object.keys(notes).length; }
 export function partyCount() { return partyNoteCount(); }
-export function notesModeOn() { return notesMode; }
+export function notesModeOn() { return notesMode(); }

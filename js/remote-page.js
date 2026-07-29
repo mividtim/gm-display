@@ -7,7 +7,7 @@ import { drawAllMarkers, ensureMarkerLoop } from './markers.js';
 import { onPartyNotesChanged, partyNotes, partyNotesFor, savePartyNote, setPartyNotesMap, startPartyNotesPolling } from './party-notes.js';
 import { slugify } from './state.js';
 import { S } from './store.js';
-import { applyGridWire, initialsOf } from './tokens.js';
+import { applyGridWire, initialsOf, tokenFillOpacity } from './tokens.js';
 // ===================================================================
 // REMOTE PLAYER PAGE  (remote.html)
 // ===================================================================
@@ -144,6 +144,14 @@ function renderRemoteRoster() {
     if (!taken) card.onclick = () => selectCharacter(t);
     wrap.appendChild(card);
   });
+}
+
+// Whoever is drawing should be obvious without asking. The line is the colour
+// of the token you are playing — resolved now, not at join time, so it follows
+// the token if the GM recolours it.
+export function myMarkerColor() {
+  const t = S.tokens.find(x => x.id === S.remoteClaimId);
+  return (t && (t.ownerColor || t.color)) || S.remotePlayerColor;
 }
 
 export function remoteToggleMarker() {
@@ -403,6 +411,8 @@ function renderRemoteTokens() {
   const mw = S.remoteFrame.width;
   const diamPx = kTokenDiam(mw) * S.remoteScale * TOKEN_FRAC;
   const mine = S.tokens.find(t => t.id === S.remoteClaimId);
+  const dot = document.getElementById('remote-color-dot');
+  if (dot) dot.style.background = myMarkerColor();
   const company = S.tokens.find(t => isParty(t) && t.onMap);
   document.getElementById('remote-token-info').textContent =
     mine ? ('Playing ' + tokenDisplayName(mine)
@@ -427,8 +437,15 @@ function makeRemoteTokenEl(t, tx, ty, diamPx, isGhost, canControl) {
   const p = remoteMapToCanvas(tx * mw, ty * mh);
   el.style.left = p.x + 'px'; el.style.top = p.y + 'px';
   el.style.width = diamPx + 'px'; el.style.height = diamPx + 'px';
-  if (t.img) el.style.backgroundImage = 'url("' + t.img + '")';
-  else { el.style.background = t.color; el.textContent = initialsOf(t.base); }
+  const fill = document.createElement('span');
+  fill.className = 'tok-fill';
+  fill.style.opacity = tokenFillOpacity(t);
+  if (t.img) { fill.style.backgroundImage = 'url("' + t.img + '")'; }
+  else { fill.style.background = t.color; }
+  el.appendChild(fill);
+  if (!t.img) { const ini = document.createElement('span');
+                ini.className = 'tok-ini'; ini.textContent = initialsOf(t.base);
+                el.appendChild(ini); }
   if (!isGhost && t.ownerColor) el.style.borderColor = t.ownerColor;
   const lab = document.createElement('span'); lab.className = 'tok-label'; lab.textContent = tokenDisplayName(t);
   el.appendChild(lab);
@@ -471,7 +488,7 @@ function attachRemoteMarkerHandlers() {
   stage.addEventListener('pointerdown', (e) => {
     if (!S.remoteMarkerMode) return;
     const b = box();
-    S._markerStroke = { id: uid('m'), by: S.myActorName, color: S.remotePlayerColor, points: [] };
+    S._markerStroke = { id: uid('m'), by: S.myActorName, color: myMarkerColor(), points: [] };
     remoteAddMarkerPoint(e, b);
   });
   stage.addEventListener('pointermove', (e) => { if (S._markerStroke && S.remoteMarkerMode) remoteAddMarkerPoint(e, box()); });

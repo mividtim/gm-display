@@ -324,3 +324,45 @@ Most maps worth using already have a grid printed on them. Overlaying ours gives
 the table two grids, one of which is a blue approximation of the other. Both
 realm maps ship `"show": false` in their `.key.json` for exactly that reason:
 calibrate to the printed hexes, don't redraw them.
+
+## The tool strip
+
+`S.currentTool` (fog brush), `S.markerMode` and a private `notesMode` used to be
+three independent flags, each reaching into the layer stack to switch
+`pointer-events` on its own. Nothing stopped two being on at once, and clicking
+the map meant different things depending on which panel you had touched last.
+
+There is now one `S.activeTool` and one function, `applyTool()`, that decides
+which layer is live. Six tools — None, Reveal, Hide, Tokens, Notes, Marker —
+exactly one active, shown in a strip over the map that cannot be collapsed away.
+Keys R/H/V/N/M; Escape steps out one level at a time (close an open note, then
+drop to None, then leave the map).
+
+`setTool()`, `toggleNotesMode()` and `toggleMarkerMode()` are kept as thin
+aliases onto the selector, so the sidebar buttons and saved state still work and
+there is still only one piece of truth.
+
+Picking a tool also opens and scrolls to its sidebar section — the brush size
+lives with the fog tools, the roster with tokens, the note index with notes.
+Opening the section by hand every time is the friction that stops people using
+the settings at all.
+
+The session test asserts, for each of the six, that exactly one button is lit
+and exactly one layer is interactive. It also drags on the map under Reveal and
+checks the projector got brighter, then repeats the identical drag under None
+and checks nothing changed — the two halves of "the tool decides what a drag
+does".
+
+## Token fill
+
+A token has to mark its cell without hiding what is drawn in it; on a realm hex
+the art *is* the information. The fill is now its own layer (`.tok-fill` in the
+DOM, a `globalAlpha` pass on the projector) so it can fade while the ring, the
+initials and the label stay fully opaque and the token still reads across a
+room. `S.tokenOpacity` is campaign-wide with a slider, default 62%; the Company
+fades further still (×0.55) because it is the largest piece and sits on the hex
+that matters most.
+
+A player's marker line is the colour of the token they are playing, resolved at
+draw time rather than at join time — so it stays right if the GM recolours the
+token mid-session, and it is always obvious who is drawing.

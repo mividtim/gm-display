@@ -9,6 +9,7 @@ import { sendProjectionSettings, sendShowSettings } from './projection.js';
 import { renderGMFog, updateUndoRedoButtons } from './sidebar.js';
 import { S } from './store.js';
 import { pushPlayerStateToServer } from './tokens.js';
+import { setActiveTool } from './tools.js';
 export function ensureDefaultPreset() {
   if (S.fogPresets.length === 0) {
     S.fogPresets = [{ name: 'Default', rle: S.fogMask ? rlEncode(S.fogMask) : [], w: S.mapWidth, h: S.mapHeight }];
@@ -252,12 +253,13 @@ export function renderPresetThumbnails() {
   });
 }
 
+// Kept as the name the rest of the app already calls. Picking a fog brush is
+// picking a tool now, so this routes through the one selector rather than
+// setting a second piece of mode state beside it.
 export function setTool(tool) {
-  S.currentTool = tool;
-  document.getElementById('btn-reveal').classList.toggle('active', tool === 'reveal');
-  document.getElementById('btn-hide').classList.toggle('active', tool === 'hide');
-  saveState();
+  setActiveTool(tool === 'hide' ? 'hide' : 'reveal');
 }
+
 
 export function updateBrushPreview() {
   const el = document.getElementById('brush-preview');

@@ -11,7 +11,10 @@ S.loadedImage = null;
 S.fogMask = null;
 S.fogImage = null;
 S.mapWidth = 0; S.mapHeight = 0;
-S.currentTool = 'reveal';
+S.currentTool = 'reveal';   // fog brush polarity, driven by the reveal/hide tools
+// Which tool a click on the map runs. The single source of truth for that —
+// see js/tools.js. Tokens is the safe default: it edits nothing on its own.
+S.activeTool = 'none';
 S.brushSize = 40;
 S.painting = false;
 S.currentMode = 'landing';

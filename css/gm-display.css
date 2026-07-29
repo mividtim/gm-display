@@ -1104,3 +1104,50 @@ body {
   background: rgba(0,0,0,0.35); font-weight: 700;
 }
 #fog-staged-banner:hover { background: rgba(220,120,64,0.98); }
+
+/* === Tool strip === what a click or drag on the map does === */
+#tool-bar {
+  position: absolute; top: 10px; left: 10px; z-index: 45;
+  display: flex; align-items: stretch; gap: 3px;
+  padding: 4px; border-radius: 8px;
+  background: rgba(24,24,28,0.92);
+  border: 1px solid #444;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.5);
+  backdrop-filter: blur(6px);
+  user-select: none;
+}
+#tool-bar .tool-btn {
+  display: flex; flex-direction: column; align-items: center; gap: 1px;
+  min-width: 56px; padding: 5px 8px 4px;
+  background: transparent; border: 1px solid transparent; border-radius: 5px;
+  color: #bbb; cursor: pointer; font: 500 10px/1.1 system-ui, sans-serif;
+}
+#tool-bar .tool-btn:hover { background: #33333a; color: #eee; }
+#tool-bar .tool-btn.active {
+  background: #6a4; border-color: #8c6; color: #fff;
+}
+#tool-bar .tb-icon { font-size: 15px; line-height: 1; }
+#tool-bar .tb-label { font-size: 10px; }
+#tool-bar .tb-key {
+  font-size: 8px; opacity: 0.55; letter-spacing: 0.05em;
+}
+#tool-bar .tool-hint {
+  align-self: center; padding: 0 10px 0 6px;
+  font: 11px/1.2 system-ui, sans-serif; color: #8b8b93;
+  max-width: 260px;
+}
+
+/* Token fill lives in its own layer so fading it leaves the ring, the initials
+   and the label at full strength — the token still reads, the hex shows
+   through. See S.tokenOpacity. */
+.token .tok-fill {
+  position: absolute; inset: 0;
+  border-radius: 50%;
+  background-size: cover; background-position: center;
+  pointer-events: none;
+}
+.token .tok-ini {
+  position: relative; z-index: 1;
+  text-shadow: 0 0 3px rgba(0,0,0,0.85), 0 0 3px rgba(0,0,0,0.85);
+  pointer-events: none;
+}
