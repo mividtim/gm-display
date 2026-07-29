@@ -442,6 +442,71 @@ body {
   text-align: center;
   display: none; z-index: 100;
 }
+
+/* === Legend — the map's own caption === */
+/* One set of row styles for all three surfaces; only the scale differs. */
+.lg-group {
+  font: 700 10px/1 system-ui, sans-serif;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: #8b7355;
+  margin: 8px 0 4px;
+}
+.lg-group:first-child { margin-top: 0; }
+.lg-row {
+  display: flex; align-items: center; gap: 7px;
+  padding: 2px 0;
+}
+.lg-icon {
+  flex: none;
+  width: 22px; height: 22px;
+  border-radius: 3px;
+  background-size: cover; background-position: center;
+  border: 1px solid rgba(0,0,0,0.5);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.12);
+}
+.lg-icon-none { background: none; border: none; box-shadow: none; }
+.lg-text { font-size: 12px; line-height: 1.35; }
+.lg-text b { color: #e0c060; }
+.lg-gloss { color: #bbb; }
+
+/* GM sidebar */
+.legend-list { padding-right: 2px; }
+
+/* Projector: a corner card, outside the rotation wrap so it stays upright and
+   readable however the projector is keystoned. */
+/* --lg-scale is driven from JS: the box shrinks its own type until every entry
+   fits. A wall display cannot be scrolled, so anything clipped here is simply
+   information the table never receives. */
+#player-legend {
+  position: fixed;
+  right: 24px; bottom: 24px;
+  max-width: 52vw; max-height: 88vh; overflow: hidden;
+  background: rgba(0,0,0,0.82);
+  border: 2px solid #8b7355; border-radius: 8px;
+  padding: 14px 20px;
+  display: none; z-index: 99;
+  --lg-scale: 1;
+  column-width: calc(19em * var(--lg-scale)); column-gap: 26px;
+}
+#player-legend .lg-inner { display: contents; }
+#player-legend .lg-row { padding: calc(3px * var(--lg-scale)) 0; break-inside: avoid; }
+#player-legend .lg-group { break-inside: avoid; break-after: avoid;
+  font-size: calc(11px * var(--lg-scale)); margin: calc(10px * var(--lg-scale)) 0 calc(4px * var(--lg-scale)); }
+#player-legend .lg-icon { width: calc(30px * var(--lg-scale)); height: calc(30px * var(--lg-scale)); }
+#player-legend .lg-text { font-size: calc(18px * var(--lg-scale)); }
+#player-legend .lg-text b { color: #f0d890; }
+#player-legend .lg-gloss { color: #d8cdb4; }
+
+/* Players' page: a sheet above the bottom bar, same place the notes panel uses */
+#remote-legend-panel {
+  display: none;
+  position: absolute; left: 0; right: 0; bottom: 46px;
+  max-height: 52vh; overflow-y: auto;
+  padding: 10px 12px 14px;
+  background: #16161a; border-top: 1px solid #333;
+}
+#remote-legend-panel .lg-icon { width: 26px; height: 26px; }
+#remote-legend-panel .lg-text { font-size: 13px; }
 #player-image {
   max-width: 100%; max-height: 100%;
   object-fit: contain;

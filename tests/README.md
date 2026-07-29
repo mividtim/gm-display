@@ -8,7 +8,7 @@ refactor can be verified by diffing instead of by hoping.
     ...make changes...
     python3 tests/regress.py after.json baseline.json # capture + diff, exits 1 on drift
 
-65 probes covering: map-key geometry (square, both hex orientations, and the
+70 probes covering: map-key geometry (square, both hex orientations, and the
 anisotropic case) with a 2000-point fingerprint per shape; fog RLE round-trip
 and presets; crop maths including out-of-bounds overlap; token create,
 duplicate, snap, propose and approve; localStorage key naming; the exact shapes
@@ -176,3 +176,44 @@ a guess.
 realm sheet carries prep on all 144 hexes, and 144 gold dots over the artwork
 tell the GM nothing during play. Party pips are always drawn: they are news,
 and there are never many.
+
+## Legend
+
+What the symbols on a map mean. The realm sheet is a wall of hand-drawn terrain
+and glyphs, and nobody at the table can tell a Sanctum from a Monument without
+being told.
+
+It lives beside the notes as markdown, so it is written in Obsidian where prep
+already happens and read live here:
+
+    <vault>/Map Notes/<map name>.legend.md
+
+    ## Terrain
+    - ![](/maps/Map Notes/legend-icons/marsh.png) **Marsh** — wet reedbeds
+    - **Heath** — open scrub and heather
+
+`## ` starts a group and each `- ` line is one entry: the bold run is the name,
+whatever follows the dash is the gloss, and a leading image is the swatch. Any
+of the three may be missing, and `legend.parse` covers every combination —
+including a path with spaces in it, which vault paths routinely have and which
+a naive `[^)\s]+` truncates at the first space.
+
+Shown in three places from one renderer: the GM sidebar, a corner card on the
+projector, and a sheet on players' phones. It is the map's caption rather than
+the GM's prep, so nobody is kept from it — and a legend containing a "GM only"
+group only reaches players if the GM projects the GM copy of the map, which
+shows them far more than the legend anyway.
+
+`legend.escapes` exists because this is the one place the app puts vault
+content into `innerHTML`, on all three surfaces at once.
+
+`legend.projector.fit` covers the wall. `fitLegendBox` shrinks the card's own
+type until every entry fits, because nobody can scroll a projector: a legend
+that overflows is not "mostly shown", the rows past the fold simply never reach
+the table, and silently. The first version clipped 7 of the realm's 25 entries
+and looked perfectly fine doing it.
+
+Mutation-tested: truncating an icon path at the first space, dropping the HTML
+escape, and disabling the fit loop are each caught.
+
+`tests/make-legend-fixture.py` writes the `__parse__.png.legend.md` fixture.

@@ -434,6 +434,24 @@
     </div>
   </details>
 
+  <details class="sb-section" id="section-legend">
+    <summary>Legend</summary>
+    <div class="sb-body">
+      <div style="font-size:11px;color:#888;margin-bottom:6px;">
+        What the symbols on this map mean. Written as markdown in your vault
+        beside the notes, so you edit it in Obsidian and it updates here as you
+        save. Show it on the projector, and players can open it on their own
+        screens.
+      </div>
+      <div style="display:flex;gap:4px;margin-bottom:6px;">
+        <button id="btn-legend-show" style="flex:1;">Show on projector</button>
+        <button id="btn-legend-start" title="Create the legend file in your vault">Start one</button>
+      </div>
+      <label>Entries: <span class="val" id="legend-status">none yet</span></label>
+      <div id="legend-body" style="max-height:300px;overflow:auto;"></div>
+    </div>
+  </details>
+
   <details class="sb-section" id="section-tokens" open>
     <summary>Tokens</summary>
     <div class="sb-body">

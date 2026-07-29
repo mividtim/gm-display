@@ -69,7 +69,8 @@ for (const f of FILES) {
     'clearInterval','requestAnimationFrame','cancelAnimationFrame','parseInt','parseFloat','isNaN',
     'alert','confirm','prompt','FileReader','Blob','URL','performance','screen','history','Response',
     'devicePixelRatio','getComputedStyle','structuredClone','Event','CustomEvent','DOMParser','atob','btoa',
-    'isFinite','decodeURIComponent','encodeURIComponent','undefined','NaN','Infinity','Intl','RegExp','Error']);
+    'isFinite','decodeURI','encodeURI','decodeURIComponent','encodeURIComponent',
+    'undefined','NaN','Infinity','Intl','RegExp','Error']);
   for (const name of freeNames) {
     if (!exportedBy[name] && !BROWSER.has(name)) missing.add(`${f}: ${name}`);
   }

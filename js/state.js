@@ -57,6 +57,10 @@ S.lastMapName = null;
 S.lastShowSrc = null;
 S.lastShowName = null;
 
+// Is the map's legend showing on the projector? Deliberately not persisted —
+// a legend left up from last session would sit over the next map's art.
+S.legendOnProjector = false;
+
 // Projection settings (sent to player)
 // 4-corner keystone: pixel offsets for each corner {x, y}
 S.corners = { tl: {x:0,y:0}, tr: {x:0,y:0}, bl: {x:0,y:0}, br: {x:0,y:0} };

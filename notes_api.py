@@ -86,6 +86,14 @@ def key_path(map_src):
     return os.path.join(d, _safe(map_src) + '.key.json') if d else None
 
 
+def legend_path(map_src):
+    """What the symbols on the map mean. Called 'legend' rather than 'key'
+    throughout, because in this app a map's key is already its grid
+    calibration and one word cannot be both."""
+    d = notes_dir()
+    return os.path.join(d, _safe(map_src) + '.legend.md') if d else None
+
+
 # ---------------------------------------------------------------------------
 # markdown <-> dict
 # ---------------------------------------------------------------------------
@@ -237,6 +245,132 @@ def _save_party(map_src, cells):
 
 
 # ---------------------------------------------------------------------------
+# legend — what the symbols on the map mean
+# ---------------------------------------------------------------------------
+# A beautiful map is not a readable one. The realm sheet is a wall of hand-drawn
+# terrain and glyphs, and nobody at the table knows a Sanctum from a Monument
+# without being told. The legend lives beside the notes as markdown, so it is
+# written in Obsidian where prep already happens, and read live here:
+#
+#     <vault>/Map Notes/<map name>.legend.md
+#
+#     ## Terrain
+#     - ![](/maps/Map Notes/legend-icons/marsh.png) **Marsh** — wet reedbeds
+#     - **Heath** — open scrub and heather
+#
+#     ## Landmarks
+#     - **Sanctum** — a Seer lives here
+#
+# '## ' starts a group, '- ' is an entry. The bold run is the name, whatever
+# follows a dash is the gloss, and a leading image is the swatch. Any of the
+# three may be missing.
+
+_LEGEND_ENTRY = re.compile(
+    r'^-\s*'
+    # ![](path) — the path may contain spaces, which vault paths routinely do,
+    # so take everything up to the closing paren and drop any "title" after it.
+    r'(?:!\[[^\]]*\]\(\s*(?P<icon>[^)]+?)\s*(?:"[^"]*")?\s*\)\s*)?'
+    r'(?:!\[\[\s*(?P<wiki>[^\]|]+?)\s*(?:\|[^\]]*)?\]\]\s*)?'  # ![[wikilink]]
+    r'(?:\*\*(?P<name>.+?)\*\*\s*)?'
+    r'(?:[—–-]\s*)?'
+    r'(?P<text>.*)$'
+)
+
+
+def _parse_legend(text):
+    """-> [{'title': str, 'entries': [{icon,name,text}]}]. Entries written
+    before any heading land in an untitled first group."""
+    body = text
+    m = re.match(r'^---\n.*?\n---\n?(.*)$', text, re.S)
+    if m:
+        body = m.group(1)
+    body = re.sub(r'^#\s+.*$', '', body, count=1, flags=re.M)   # drop the H1
+    groups = []
+    cur = {'title': '', 'entries': []}
+    for line in body.split('\n'):
+        s = line.strip()
+        if s.startswith('## '):
+            if cur['entries'] or cur['title']:
+                groups.append(cur)
+            cur = {'title': s[3:].strip(), 'entries': []}
+            continue
+        if not s.startswith('-'):
+            continue
+        em = _LEGEND_ENTRY.match(s)
+        if not em:
+            continue
+        icon = em.group('icon') or ''
+        if not icon and em.group('wiki'):
+            # An Obsidian embed names a file, not a path. Serve it from the
+            # legend-icons folder, which is where this app puts swatches.
+            icon = '/maps/' + SUBDIR + '/legend-icons/' + em.group('wiki').strip()
+        name = (em.group('name') or '').strip()
+        gloss = (em.group('text') or '').strip().lstrip('—–-').strip()
+        if not (name or gloss or icon):
+            continue
+        cur['entries'].append({'icon': icon, 'name': name, 'text': gloss})
+    if cur['entries'] or cur['title']:
+        groups.append(cur)
+    return [g for g in groups if g['entries']]
+
+
+def _load_legend(map_src, force=False):
+    path = legend_path(map_src)
+    if not path:
+        return []
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        _cache.pop(('legend', path), None)
+        return []
+    hit = _cache.get(('legend', path))
+    if hit and not force and hit['mtime'] == mtime:
+        return hit['groups']
+    try:
+        with open(path, encoding='utf-8') as f:
+            groups = _parse_legend(f.read())
+    except OSError:
+        groups = []
+    _cache[('legend', path)] = {'mtime': mtime, 'groups': groups}
+    return groups
+
+
+_LEGEND_STARTER = """---
+map: "{map_src}"
+tags:
+  - gm-display
+  - map-legend
+---
+
+# Legend — {name}
+
+Write what the symbols on this map mean. `## ` starts a group and each `- `
+line is one entry: **bold** is the name, the rest is the gloss, and a leading
+image becomes the swatch. It shows up in GM Display as you save.
+
+## Terrain
+
+- **Example** — replace this with the real thing
+
+## Symbols
+
+- **Example** — and this
+"""
+
+
+def _start_legend(map_src):
+    """Create the file so the GM has something to open in Obsidian rather than
+    a blank panel and no idea where the content is supposed to come from."""
+    path = legend_path(map_src)
+    if not path or os.path.exists(path):
+        return path
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(_LEGEND_STARTER.format(map_src=map_src, name=_safe(map_src)))
+    return path
+
+
+# ---------------------------------------------------------------------------
 # HTTP
 # ---------------------------------------------------------------------------
 
@@ -273,6 +407,20 @@ def handle_get(h, parsed=None):
         map_src = (q.get('map') or [''])[0]
         with _lock:
             _send(h, {'map': map_src, 'cells': _load_party(map_src), 'version': _version})
+        return True
+
+    # The legend is read by everyone — it is the map's own caption, and a
+    # player who cannot read the map is not being kept in suspense, just
+    # confused.
+    if parsed.path == '/api/legend':
+        q = urllib.parse.parse_qs(parsed.query)
+        map_src = (q.get('map') or [''])[0]
+        path = legend_path(map_src)
+        with _lock:
+            groups = _load_legend(map_src)
+        _send(h, {'map': map_src, 'groups': groups,
+                  'file': path if (path and os.path.exists(path)) else '',
+                  'count': sum(len(g['entries']) for g in groups)})
         return True
 
     if parsed.path != '/api/notes':
@@ -319,6 +467,30 @@ def handle_post(h, parsed=None):
                 cells.pop(cell, None)
             _save_party(map_src, cells)
             _send(h, {'ok': True, 'version': _version})
+        return True
+
+    # Starting a legend writes a template into the vault for the GM to fill in
+    # in Obsidian. Prep, so the GM only.
+    if parsed.path == '/api/legend/start':
+        if h.is_remote():
+            _send(h, {'error': 'forbidden'}, 403)
+            return True
+        try:
+            n = int(h.headers.get('Content-Length', 0))
+            body = json.loads(h.rfile.read(n).decode()) if n else {}
+        except Exception:
+            _send(h, {'error': 'bad body'}, 400)
+            return True
+        map_src = body.get('map') or ''
+        if not map_src:
+            _send(h, {'error': 'map required'}, 400)
+            return True
+        if not notes_dir():
+            _send(h, {'error': 'no vault'}, 503)
+            return True
+        with _lock:
+            path = _start_legend(map_src)
+        _send(h, {'ok': True, 'file': path or ''})
         return True
 
     if parsed.path != '/api/notes':

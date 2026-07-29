@@ -193,6 +193,44 @@ async def capture(pg, results):
                 typeof G.setPartyNotesMap, typeof G.partyCount,
                 Array.isArray(G.partyNotesFor('nope'))];})()"""))
 
+    # --- legend -------------------------------------------------------------
+    # What the symbols mean. Markdown in the vault, parsed server-side into
+    # groups of entries, rendered identically on all three surfaces.
+    put('legend.start', await pg.evaluate("""(async () => {
+        const map = '/maps/__harness__.png';
+        const r = await fetch('/api/legend/start', {method:'POST',
+          headers:{'Content-Type':'application/json'}, body: JSON.stringify({map})});
+        const d = await r.json();
+        const g = await (await fetch('/api/legend?map=' + encodeURIComponent(map),
+          {cache:'no-store'})).json();
+        return [d.ok === true, d.file.endsWith('__harness__.png.legend.md'),
+                g.groups.map(x => [x.title, x.entries.length]), g.count];
+      })()"""))
+    # The shapes a legend line can take: swatch or not, name or not, gloss or
+    # not. Get this wrong and an entry silently disappears from the panel.
+    put('legend.parse', await pg.evaluate("""(async () => {
+        const map = '/maps/__parse__.png';
+        const g = await (await fetch('/api/legend?map=' + encodeURIComponent(map),
+          {cache:'no-store'})).json();
+        return g.groups;
+      })()"""))
+    # Point the module at the fixture, then read what it would draw. Rows,
+    # group headings, and how many entries have no swatch.
+    await pg.evaluate("window.GMD.setLegendMap('/maps/__parse__.png')")
+    await pg.wait_for_timeout(700)
+    put('legend.render', await pg.evaluate("""(()=>{
+        const html = window.GMD.legendHTML();
+        return [(html.match(/lg-row/g)||[]).length, (html.match(/lg-group/g)||[]).length,
+                (html.match(/lg-icon-none/g)||[]).length, window.GMD.legendCount()];})()"""))
+    # A gloss carrying markup must arrive as text. The legend is the one place
+    # the app puts vault content into innerHTML, on all three surfaces.
+    put('legend.escapes', await pg.evaluate("""(()=>{
+        const html = window.GMD.legendHTML();
+        return [/<img/i.test(html), html.includes('&lt;img'),
+                html.includes('markup must stay text')];})()"""))
+    await pg.evaluate("window.GMD.setLegendMap(relMapSrc(lastMapSrc))")
+    await pg.wait_for_timeout(300)
+
     # --- persistence keys ---------------------------------------------------
     put('storage.keys', await pg.evaluate("""[
         gameKey('state'), gameKey('library'), gameKey('crop:X'), gameKey('bg:X'),
@@ -388,12 +426,32 @@ async def run(out_path):
                 results['remote.screens'] = await p2.evaluate("""(()=>{
                     const d = id => getComputedStyle(document.getElementById(id)).display;
                     return [d('remote-view'), d('remote-select'), d('remote-stage'),
-                            d('remote-bar'), d('remote-note-panel')];})()""")
+                            d('remote-bar'), d('remote-note-panel'),
+                            d('remote-legend-panel')];})()""")
                 results['remote.notes.controls'] = await p2.evaluate("""(()=>{
                     const c = document.getElementById('remote-note-canvas');
                     return [!!document.getElementById('remote-notes-btn'), !!c,
                             c.classList.contains('armed'),
                             getComputedStyle(c).pointerEvents];})()""")
+            if label == 'projector':
+                # The projector card shrinks its own type until every entry
+                # fits. Nobody can scroll a wall, so a legend that overflows
+                # is not "mostly shown" — the rest never reaches the table.
+                results['legend.projector.fit'] = await p2.evaluate("""(()=>{
+                    const box = document.getElementById('player-legend');
+                    if (!box) return 'no box';
+                    let rows = '';
+                    for (let i = 0; i < 40; i++)
+                      rows += '<div class="lg-row"><span class="lg-icon"></span>'
+                            + '<span class="lg-text"><b>Entry ' + i + '</b>'
+                            + ' — a gloss of roughly the usual length</span></div>';
+                    box.innerHTML = rows;
+                    box.style.display = 'block';
+                    const scale = window.GMD.fitLegendBox(box);
+                    const over = [box.scrollHeight - box.clientHeight,
+                                  box.scrollWidth - box.clientWidth];
+                    box.style.display = 'none'; box.innerHTML = '';
+                    return [scale < 1, over[0] <= 1, over[1] <= 1];})()""")
             await p2.close()
         await b.close()
 

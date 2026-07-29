@@ -2,6 +2,7 @@
 // The remote player page.
 import { rlDecode } from './games.js';
 import { REMOTE_COLORS, TOKEN_FRAC, cellAtMapPx, cellCenterMapPx, cellFromLabel, cellLabel, clamp01, drawMapGrid, isParty, kTokenDiam, snapNorm, tokenClass, tokenDisplayName, tokenFrac, uid } from './geometry.js';
+import { legendCount, legendHTML, onLegendChanged, setLegendMap, startLegendPolling } from './legend.js';
 import { drawAllMarkers, ensureMarkerLoop } from './markers.js';
 import { onPartyNotesChanged, partyNotes, partyNotesFor, savePartyNote, setPartyNotesMap, startPartyNotesPolling } from './party-notes.js';
 import { slugify } from './state.js';
@@ -27,6 +28,8 @@ export function setupRemoteView() {
   attachRemoteNoteHandler();
   startPartyNotesPolling(4000);
   onPartyNotesChanged(() => { drawRemoteNotePips(); renderRemoteNotePanel(); });
+  startLegendPolling(6000);
+  onLegendChanged(() => renderRemoteLegend());
   window.addEventListener('resize', () => { if (S.remoteScreen === 'play') remoteRelayout(); });
   // Poll from the start so the roster fills in (and stays current) on the
   // selection screen, then keeps the map live once a character is chosen.
@@ -190,9 +193,33 @@ export function remoteToggleNotes() {
   if (c) c.classList.toggle('armed', remoteNotesMode);
   // Marker mode and notes mode both want the tap; last one on wins.
   if (remoteNotesMode && S.remoteMarkerMode) remoteToggleMarker();
+  if (remoteNotesMode && remoteLegendOpen) remoteToggleLegend();  // one sheet at a time
   if (!remoteNotesMode) { remoteCell = null; remoteNoteDraft = null; remoteNoteStatus = ''; }
   renderRemoteNotePanel();
   drawRemoteNotePips();
+}
+
+// --- the legend, on the player's own screen ---------------------------------
+// The map's caption, not the GM's prep, so nobody has to ask what a glyph is
+// while their turn goes past.
+let remoteLegendOpen = false;
+
+export function remoteToggleLegend() {
+  remoteLegendOpen = !remoteLegendOpen;
+  const b = document.getElementById('remote-legend-btn');
+  if (b) b.classList.toggle('active', remoteLegendOpen);
+  if (remoteLegendOpen && remoteNotesMode) remoteToggleNotes();  // one sheet at a time
+  renderRemoteLegend();
+}
+
+function renderRemoteLegend() {
+  const panel = document.getElementById('remote-legend-panel');
+  if (!panel) return;
+  panel.style.display = remoteLegendOpen ? 'block' : 'none';
+  if (!remoteLegendOpen) { panel.innerHTML = ''; return; }
+  panel.innerHTML = legendCount()
+    ? legendHTML()
+    : '<div class="remote-empty">The GM has not written a legend for this map.</div>';
 }
 
 // Inverse of remoteMapToCanvas: canvas px back to map px.
@@ -317,6 +344,7 @@ function renderRemoteFrame() {
   img.onload = () => {
     S.remoteImg = img; paintRemoteFog(img); renderRemoteTokens(); drawAllMarkers();
     setPartyNotesMap(S.remoteFrame.imageSrc);
+    setLegendMap(S.remoteFrame.imageSrc);
     drawRemoteNotePips();
   };
   img.src = S.remoteFrame.imageSrc;

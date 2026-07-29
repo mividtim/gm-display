@@ -12,9 +12,10 @@ import { copyPreset, newPreset, setTool, syncNow, toggleLiveSync } from './fog-p
 import { startImageMode, switchToMapFog } from './fog.js';
 import { deleteActiveGame, moveModulePrompt, newCampaignPrompt, newGamePrompt, onCampaignSelectChange, onGameSelectChange, renameActiveGame } from './games.js';
 import { openDisplay } from './init.js';
+import { startLegendFromButton, toggleLegendOnProjector } from './legend.js';
 import { addArtFromVault, refreshArtVaultOptions } from './per-map-store.js';
 import { nudgeCorner, resetCorner, resetProjection, rotateBy, setBg, setGridColor, setRotation, toggleGrid, toggleTestPattern, updateGridOpacity, updateGridSize, updateScale } from './projection.js';
-import { remoteChangeCharacter, remoteToggleMarker, remoteToggleNotes } from './remote-page.js';
+import { remoteChangeCharacter, remoteToggleLegend, remoteToggleMarker, remoteToggleNotes } from './remote-page.js';
 import { fogRedo, fogUndo, hideAll, revealAll, toggleSidebarCollapsed } from './sidebar.js';
 import { addCompanyToken, addRosterTokenFromSelect, createTokenFromForm, nudgeKeyCell, nudgeKeyCellY, nudgeKeyOrigin, refreshTokenImageOptions, resetMapKey, setKeyAcross, setKeyCell, setKeyCellY, setKeyOx, setKeyOy, setKeyShape, setTokenGridColor, toggleKeyLink, toggleMarkerMode, toggleTokenGrid } from './tokens.js';
 const unbound = [];
@@ -128,6 +129,8 @@ export function attachGmBindings() {
   bind('[data-act="b63"]', 'click', () => { refreshTokenImageOptions(); });
   bind('[data-act="b64"]', 'click', () => { createTokenFromForm(); });
   bind('#btn-company', 'click', () => { addCompanyToken(); });
+  bind('#btn-legend-show', 'click', () => { toggleLegendOnProjector(); });
+  bind('#btn-legend-start', 'click', () => { startLegendFromButton(); });
   bind('[data-act="b65"]', 'click', () => { addRosterTokenFromSelect(); });
   bind('#btn-marker', 'click', () => { toggleMarkerMode(); });
   bind('[data-act="b66"]', 'click', () => { showTextOnPlayer(); });
@@ -146,6 +149,7 @@ export function attachRemoteBindings() {
   bind('#remote-notes-btn', 'click', () => { remoteToggleNotes(); });
   bind('#remote-change-btn', 'click', () => { remoteChangeCharacter(); });
   bind('#remote-marker-btn', 'click', () => { remoteToggleMarker(); });
+  bind('#remote-legend-btn', 'click', () => { remoteToggleLegend(); });
   return unbound;
 }
 

@@ -5,6 +5,7 @@
 // Switch which "view" is shown in the main content area. The sidebar is
 // always visible; only the main canvas/preview/welcome swaps.
 import { saveState } from './games.js';
+import { projectorLegend } from './legend.js';
 import { renderImageLibrary, renderMapLibrary, savePerMapFog } from './per-map-store.js';
 import { applyProjectionTransform, drawGrid, renderPlayerFogDoubleBuffered, renderPlayerImage, renderTestPattern } from './player-view.js';
 import { projectorHandleMessage } from './projector.js';
@@ -70,6 +71,13 @@ export function setupPlayerChannel() {
     // Token / marker overlays (projector only — sidecar ignores them).
     if (d.type === 'tokens' || d.type === 'markers') {
       if (S.playerDisplay === 'map') projectorHandleMessage(d);
+      return;
+    }
+
+    // The legend rides beside the tokens: it captions the map, so it belongs
+    // on the map display and nowhere else.
+    if (d.type === 'legend') {
+      if (S.playerDisplay === 'map') projectorLegend(d);
       return;
     }
 

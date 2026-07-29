@@ -4,6 +4,7 @@ import { drawNoteMarkers, initCellNotes, notesOnMapChanged } from './cell-notes.
 import { rlEncode } from './games.js';
 import { TOKEN_SIDES, cellAtMapPx, cellLabel, clamp01, drawMapGrid, isFlatHex, isHexKey, isParty, kCellH, kCellW, kRegularStepY, kStepY, kTokenDiam, mapDims, relMapSrc, snapNorm, tokenClass, tokenDisplayName, tokenFrac, uid } from './geometry.js';
 import { setStatus } from './keyboard.js';
+import { initLegendGM, legendOnMapChanged } from './legend.js';
 import { ensureMarkerLoop } from './markers.js';
 import { parseHexColor } from './navigation.js';
 import { campaignKey, gameKey } from './state.js';
@@ -208,6 +209,7 @@ export function setTokenMap(src) {
   hydrateTokensForMap(src);
   applySavedMapKey(src);
   notesOnMapChanged();                // notes belong to the map, not the session
+  legendOnMapChanged();               // and so does the legend
   renderTokenList();
   renderGMTokens();
   broadcastTokens();
@@ -232,6 +234,7 @@ export function initTokensGM() {
   refreshTokenImageOptions();
   applySavedMapKey(S.lastMapSrc);
   initCellNotes();
+  initLegendGM();
   syncKeyPanel();
   attachKeyNudgeKeys();
   pushTokensToServer();

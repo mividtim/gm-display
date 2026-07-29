@@ -180,6 +180,79 @@
   53.3,
   53.3
  ],
+ "legend.escapes": [
+  false,
+  true,
+  true
+ ],
+ "legend.parse": [
+  {
+   "entries": [
+    {
+     "icon": "/maps/Map Notes/legend-icons/terrain-bog.png",
+     "name": "Bog",
+     "text": "dark peat"
+    },
+    {
+     "icon": "/maps/Map Notes/legend-icons/terrain-lake.png",
+     "name": "Lake",
+     "text": "deep open water"
+    },
+    {
+     "icon": "",
+     "name": "Heath",
+     "text": "open scrub"
+    },
+    {
+     "icon": "",
+     "name": "Plains",
+     "text": ""
+    },
+    {
+     "icon": "",
+     "name": "",
+     "text": "a gloss with no name at all"
+    }
+   ],
+   "title": "Terrain"
+  },
+  {
+   "entries": [
+    {
+     "icon": "",
+     "name": "",
+     "text": "<img src=x onerror=alert(1)> **Trap** \u2014 markup must stay text"
+    }
+   ],
+   "title": "Danger"
+  }
+ ],
+ "legend.projector.fit": [
+  true,
+  true,
+  true
+ ],
+ "legend.render": [
+  6,
+  2,
+  4,
+  6
+ ],
+ "legend.start": [
+  true,
+  true,
+  [
+   [
+    "Terrain",
+    1
+   ],
+   [
+    "Symbols",
+    1
+   ]
+  ],
+  2
+ ],
  "library.entries": [
   "/maps/Maps/printed-grid.png"
  ],
@@ -303,6 +376,7 @@
   "flex",
   "none",
   "none",
+  "none",
   "none"
  ],
  "role.gm": [
@@ -399,7 +473,7 @@
   "P"
  ],
  "ui.bindings": [
-  107,
+  109,
   []
  ],
  "ui.controls": [
@@ -418,6 +492,8 @@
   "btn-key-hex",
   "btn-key-hexflat",
   "btn-key-square",
+  "btn-legend-show",
+  "btn-legend-start",
   "btn-live-sync",
   "btn-marker",
   "btn-notes-mode",
@@ -471,6 +547,8 @@
   "key-oy-val",
   "key-rowh-controls",
   "key-rowh-wrap",
+  "legend-body",
+  "legend-status",
   "library-list",
   "library-wrap",
   "map-bg-color",
@@ -495,6 +573,7 @@
   "rotation-val",
   "scale-slider",
   "scale-val",
+  "section-legend",
   "section-mapkey",
   "section-notes",
   "section-projector-adjustments",
@@ -532,6 +611,7 @@
   "Projector Alignment",
   "Map Grid",
   "Cell Notes",
+  "Legend",
   "Tokens",
   "Text Overlay"
  ],
