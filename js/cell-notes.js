@@ -18,6 +18,8 @@ let pollTimer = null;
 
 const el = (id) => document.getElementById(id);
 const currentMap = () => relMapSrc(S.lastMapSrc || '');
+const esc = (s) => String(s == null ? '' : s).replace(/[<>&"]/g,
+  c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
 
 // ---------------------------------------------------------------- server ---
 export async function loadNotes(silent) {
@@ -72,11 +74,8 @@ function attachNotesLayer() {
   if (!layer || layer._wired) return;
   layer._wired = true;
   layer.addEventListener('click', (e) => {
-    const r = layer.getBoundingClientRect();
-    const { mw, mh } = mapDims();
-    const mx = (e.clientX - r.left) * (mw / r.width);
-    const my = (e.clientY - r.top) * (mh / r.height);
-    selectCell(cellLabel(cellAtMapPx(mx, my)));
+    const label = cellAtClient(e.clientX, e.clientY);
+    if (label) openNoteAt(label, e.clientX, e.clientY);
   });
 }
 
@@ -86,6 +85,207 @@ export function selectCell(label) {
   drawNoteMarkers();
   const ta = el('note-text');
   if (ta) ta.focus();
+}
+
+// ------------------------------------------------------- notes on the map ---
+// Reading a note should not mean looking away from the map. Hovering a cell
+// peeks at what is written there, and right-clicking opens the editor on the
+// spot — in any mode, because the moment you want to write something down is
+// rarely the moment you were planning to switch modes. The sidebar keeps the
+// index of every note on the map; it is no longer the only way in.
+
+// Screen point -> cell label, or '' when the pointer is off the map or the map
+// has no calibration (in which case a cell address would be invented).
+function cellAtClient(cx, cy) {
+  const wrap = el('gm-canvas-wrap');
+  if (!wrap || !S.tokenGridEnabled) return '';
+  const r = wrap.getBoundingClientRect();
+  if (!r.width || !r.height) return '';
+  if (cx < r.left || cx > r.right || cy < r.top || cy > r.bottom) return '';
+  const { mw, mh } = mapDims();
+  const mx = (cx - r.left) * (mw / r.width);
+  const my = (cy - r.top) * (mh / r.height);
+  return cellLabel(cellAtMapPx(mx, my, mw, mh));
+}
+
+// Where a cell sits on screen, so the editor opens against it rather than
+// wherever the cursor happened to be.
+function cellClientPoint(label) {
+  const wrap = el('gm-canvas-wrap');
+  if (!wrap) return null;
+  const cell = cellFromLabel(label);
+  if (!cell) return null;
+  const r = wrap.getBoundingClientRect();
+  const { mw, mh } = mapDims();
+  const c = cellCenterMapPx(cell, mw, mh);
+  return { x: r.left + c.x / mw * r.width, y: r.top + c.y / mh * r.height };
+}
+
+// Notes are markdown, because they are real files in the vault. The editor
+// shows the source — that is what you are editing — but a peek should read
+// like prose, not like a diff. Enough of markdown to cover what a map note
+// actually uses: headings, bold, italic and bullets.
+export function mdLite(src) {
+  return esc(src).trim().split('\n').map(line => {
+    const h = line.match(/^(#{1,6})\s+(.*)$/);
+    if (h) return '<div class="nt-h">' + inline(h[2]) + '</div>';
+    const b = line.match(/^[-*]\s+(.*)$/);
+    if (b) return '<div class="nt-li">' + inline(b[1]) + '</div>';
+    if (!line.trim()) return '<div class="nt-gap"></div>';
+    return '<div>' + inline(line) + '</div>';
+  }).join('');
+}
+function inline(s) {
+  return s.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+          .replace(/(^|\W)\*(\S(?:.*?\S)?)\*(?=\W|$)/g, '$1<i>$2</i>')
+          .replace(/`(.+?)`/g, '<code>$1</code>');
+}
+
+function noteSummary(label) {
+  const mine = (notes[label] || '').trim();
+  const theirs = partyNotesFor(label);
+  if (!mine && !theirs.length) return '';
+  return '<div class="nt-cell">' + esc(label) + '</div>'
+    + (mine ? '<div class="nt-mine">' + mdLite(mine) + '</div>' : '')
+    + theirs.map(e => '<div class="nt-party"><b>' + esc(e.by || 'a player') + '</b> '
+        + esc(e.text || '') + '</div>').join('');
+}
+
+// --- hover peek -------------------------------------------------------------
+let hoverLabel = '';
+let hoverRaf = 0;
+
+function hideTip() {
+  const tip = el('gm-note-tip');
+  if (tip) tip.style.display = 'none';
+  if (hoverRaf) { cancelAnimationFrame(hoverRaf); hoverRaf = 0; }
+  hoverLabel = '';
+}
+
+function showTipAt(label, cx, cy) {
+  const tip = el('gm-note-tip');
+  if (!tip) return;
+  // The editor is open on some cell: a tooltip floating over it is noise, and
+  // a stray mousemove must not resurrect one behind the popover.
+  if (notePopOpen()) { hideTip(); return; }
+  const body = noteSummary(label);
+  // With nothing written here there is nothing to peek at — except in Notes
+  // mode, where the label tells you which cell you are about to write on.
+  if (!body && !notesMode) { hideTip(); return; }
+  tip.innerHTML = body || '<div class="nt-cell">' + esc(label) + '</div>'
+    + '<div class="nt-empty">no notes — click to write one</div>';
+  tip.style.display = 'block';
+  // Keep it on screen: flip to the other side of the cursor near an edge.
+  const r = tip.getBoundingClientRect();
+  let x = cx + 16, y = cy + 16;
+  if (x + r.width > window.innerWidth - 8) x = cx - r.width - 16;
+  if (y + r.height > window.innerHeight - 8) y = cy - r.height - 16;
+  tip.style.left = Math.max(8, x) + 'px';
+  tip.style.top = Math.max(8, y) + 'px';
+}
+
+function attachMapHover() {
+  const wrap = el('gm-canvas-wrap');
+  if (!wrap || wrap._noteHoverWired) return;
+  wrap._noteHoverWired = true;
+  wrap.addEventListener('mousemove', (e) => {
+    // Never while a drag is in flight: painting fog or moving a token is not
+    // the moment to be shown a tooltip.
+    if (e.buttons || S.markerMode) { hideTip(); return; }
+    if (hoverRaf) return;
+    hoverRaf = requestAnimationFrame(() => {
+      hoverRaf = 0;
+      const label = cellAtClient(e.clientX, e.clientY);
+      if (!label) { hideTip(); return; }
+      hoverLabel = label;
+      showTipAt(label, e.clientX, e.clientY);
+    });
+  });
+  wrap.addEventListener('mouseleave', hideTip);
+  wrap.addEventListener('pointerdown', hideTip);
+  // Right-click opens the editor on the cell, in any mode. Nothing else in the
+  // app uses the context menu, and this is the fast path: see something, write
+  // it down, without first switching what the left button does.
+  wrap.addEventListener('contextmenu', (e) => {
+    const label = cellAtClient(e.clientX, e.clientY);
+    if (!label) return;
+    e.preventDefault();
+    openNoteAt(label, e.clientX, e.clientY);
+  });
+}
+
+// --- the editor, on the map -------------------------------------------------
+function popRows(text) {
+  const lines = String(text || '').split('\n').length;
+  return Math.max(5, Math.min(14, lines + 1));
+}
+
+export function openNoteAt(label, cx, cy) {
+  const pop = el('gm-note-pop');
+  if (!pop) { selectCell(label); return; }   // no popover markup: fall back
+  hideTip();
+  selectedCell = label;
+  drawNoteMarkers();
+  renderNotesList();
+  pop.innerHTML =
+    '<div class="np-head"><b>' + esc(label) + '</b>'
+    + '<span class="np-status" id="note-pop-status"></span>'
+    + '<button class="np-close" id="note-pop-close" title="Close (Esc)">✕</button></div>'
+    // Tall enough to show what is already written, within reason — a realm hex
+    // carries a paragraph of prep and a five-row box hides most of it.
+    + '<textarea id="note-pop-text" rows="' + popRows(notes[label] || '')
+    + '" placeholder="What is here?"></textarea>'
+    + '<div id="note-pop-party"></div>';
+  pop.style.display = 'block';
+  const anchor = cellClientPoint(label) || { x: cx, y: cy };
+  const r = pop.getBoundingClientRect();
+  let x = anchor.x + 18, y = anchor.y - r.height / 2;
+  if (x + r.width > window.innerWidth - 10) x = anchor.x - r.width - 18;
+  y = Math.min(Math.max(10, y), window.innerHeight - r.height - 10);
+  pop.style.left = Math.max(10, x) + 'px';
+  pop.style.top = y + 'px';
+
+  const ta = el('note-pop-text');
+  ta.value = notes[label] || '';
+  ta.addEventListener('input', () => saveNote(label, ta.value));
+  ta.focus();
+  // Caret at the end, because you are almost always adding a line — but
+  // scrolled to the top, because you opened this to read what is already here.
+  ta.setSelectionRange(ta.value.length, ta.value.length);
+  ta.scrollTop = 0;
+  el('note-pop-close').addEventListener('click', closeNotePop);
+  renderPopParty();
+  // Also mirror into the sidebar, so the panel and the popover never disagree.
+  renderNotesPanel();
+}
+
+function renderPopParty() {
+  const host = el('note-pop-party');
+  if (host) host.innerHTML = selectedCell ? partyBlock(selectedCell) : '';
+}
+
+export function closeNotePop() {
+  const pop = el('gm-note-pop');
+  if (pop) { pop.style.display = 'none'; pop.innerHTML = ''; }
+}
+
+export function notePopOpen() {
+  const pop = el('gm-note-pop');
+  return !!pop && pop.style.display === 'block';
+}
+
+function attachNotePopDismiss() {
+  if (document._notePopWired) return;
+  document._notePopWired = true;
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && notePopOpen()) { e.stopPropagation(); closeNotePop(); }
+  });
+  document.addEventListener('pointerdown', (e) => {
+    const pop = el('gm-note-pop');
+    if (!pop || pop.style.display !== 'block') return;
+    if (pop.contains(e.target)) return;
+    closeNotePop();
+  }, true);
 }
 
 // ------------------------------------------------------------------ paint ---
@@ -157,7 +357,13 @@ function renderPartyBlock() {
   if (host) host.innerHTML = selectedCell ? partyBlock(selectedCell) : '';
 }
 
-function setNoteStatus(t) { const s = el('note-status'); if (s) s.textContent = t; }
+// Both editors show the same status: whichever one you are typing in should
+// tell you whether it reached the vault.
+function setNoteStatus(t) {
+  ['note-status', 'note-pop-status'].forEach(id => {
+    const s = el(id); if (s) s.textContent = t;
+  });
+}
 
 function renderNotesPanel() {
   const body = el('note-editor');
@@ -202,16 +408,24 @@ function renderNotesList() {
     + '<span style="color:#aaa;">' + notes[k].replace(/[<>&]/g, '').slice(0, 44)
     + (notes[k].length > 44 ? '…' : '') + '</span></div>').join('') + fileLine;
   list.querySelectorAll('[data-cell]').forEach(row =>
-    row.addEventListener('click', () => selectCell(row.dataset.cell)));
+    // Picking a note from the index takes you to it on the map, editor open,
+    // rather than only filling the panel underneath.
+    row.addEventListener('click', () => {
+      const label = row.dataset.cell;
+      const p = cellClientPoint(label);
+      if (p) openNoteAt(label, p.x, p.y); else selectCell(label);
+    }));
 }
 
 // ------------------------------------------------------------------- init ---
 export function initCellNotes() {
   attachNotesLayer();
+  attachMapHover();
+  attachNotePopDismiss();
   loadNotes(true);
   setPartyNotesMap(currentMap());
   startPartyNotesPolling(4000);
-  onPartyNotesChanged(() => { drawNoteMarkers(); renderPartyBlock(); });
+  onPartyNotesChanged(() => { drawNoteMarkers(); renderPartyBlock(); renderPopParty(); });
   // Pick up edits made in Obsidian while the page is open.
   clearInterval(pollTimer);
   pollTimer = setInterval(() => { if (!document.hidden) loadNotes(true); }, 4000);
@@ -221,6 +435,8 @@ export function initCellNotes() {
 export function notesOnMapChanged() {
   selectedCell = null;
   notes = {};
+  closeNotePop();
+  hideTip();
   loadNotes(true);
   setPartyNotesMap(currentMap());
 }

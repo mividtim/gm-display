@@ -170,6 +170,39 @@ async def capture(pg, results):
         return [a.cells['3,4'] || null, a.count, b.count];
       })()"""))
 
+    # --- notes on the map ---------------------------------------------------
+    # Reading a note should not mean looking away from the map. Hover peeks,
+    # right-click edits in place; the sidebar is the index, not the only way in.
+    put('notes.mdlite', await pg.evaluate("""(()=>{
+        const md = window.GMD.mdLite;
+        return [md('**Plains**'),
+                md('### Castle — Seat of Power'),
+                md('- one\\n- two'),
+                md('a *soft* word and `code`'),
+                md('<img src=x onerror=alert(1)>')];})()"""))
+    # The editor opens against the cell, preloaded, and closes cleanly.
+    put('notes.popover', await pg.evaluate("""(()=>{
+        const G = window.GMD;
+        G.closeNotePop();
+        const before = G.notePopOpen();
+        G.openNoteAt('4,6', 400, 300);
+        const ta = document.getElementById('note-pop-text');
+        const head = document.querySelector('#gm-note-pop .np-head b');
+        const party = document.getElementById('note-pop-party');
+        const out = [before, G.notePopOpen(), head && head.textContent,
+                     !!ta && ta.value.startsWith('Sentries on the ford'),
+                     !!party && party.innerHTML.includes('Sir Tim')];
+        G.closeNotePop();
+        out.push(G.notePopOpen(), !!document.getElementById('note-pop-text'));
+        return out;})()"""))
+    # The peek renders the note; the popover edits its markdown source. Both
+    # exist, and the tip never survives the editor opening over it.
+    put('notes.tip', await pg.evaluate("""(()=>{
+        const tip = document.getElementById('gm-note-tip');
+        const pop = document.getElementById('gm-note-pop');
+        return [!!tip, !!pop, getComputedStyle(tip).pointerEvents,
+                getComputedStyle(tip).position, getComputedStyle(pop).position];})()"""))
+
     # --- party notes --------------------------------------------------------
     # The players' half of the map. Separate file from the GM's notes, one entry
     # per author per cell, and writing again replaces only your own line.

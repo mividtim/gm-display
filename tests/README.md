@@ -8,7 +8,7 @@ refactor can be verified by diffing instead of by hoping.
     ...make changes...
     python3 tests/regress.py after.json baseline.json # capture + diff, exits 1 on drift
 
-72 probes covering: map-key geometry (square, both hex orientations, and the
+75 probes covering: map-key geometry (square, both hex orientations, and the
 anisotropic case) with a 2000-point fingerprint per shape; fog RLE round-trip
 and presets; crop maths including out-of-bounds overlap; token create,
 duplicate, snap, propose and approve; localStorage key naming; the exact shapes
@@ -244,3 +244,29 @@ system reads.
 Note `status_of()` — the retired API is checked from Python rather than from the
 page, because a 404 fetched in the browser writes a console error and
 `errors.gm` has to stay a real signal.
+
+## Notes on the map
+
+Editing a cell note used to mean looking away from the map and into the
+sidebar, which is the wrong place for a thing that is about a specific hex.
+
+- **Hover** a cell: a tooltip peeks at what is written there — your note and
+  the party's — and disappears the moment you press a button, so it never
+  interrupts painting fog or dragging a token.
+- **Right-click** a cell: the editor opens against that cell, in any mode. The
+  moment you want to write something down is rarely the moment you were
+  planning to switch modes, and nothing else in the app uses the context menu.
+- **Notes mode** still works: a plain left click opens the same editor.
+- The sidebar keeps the **index** of every note on the map; clicking a row now
+  takes you to that cell with the editor open.
+
+The peek renders the markdown (`mdLite`) because a note that reads `**Plains**`
+and `### Castle` in a tooltip is worse than no tooltip. The editor shows the
+source, because that is what you are editing. `notes.mdlite` covers both, and
+the escaping: this is vault content going into `innerHTML`.
+
+`notes.tip` asserts `pointer-events: none` on the tooltip. A tooltip that
+swallows the click it is describing is worse than one that never appears.
+
+Mutation-tested: dropping the escape and letting the tooltip take pointer
+events are each caught.

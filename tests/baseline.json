@@ -306,9 +306,32 @@
    "13,19"
   ]
  ],
+ "notes.mdlite": [
+  "<div><b>Plains</b></div>",
+  "<div class=\"nt-h\">Castle \u2014 Seat of Power</div>",
+  "<div class=\"nt-li\">one</div><div class=\"nt-li\">two</div>",
+  "<div>a <i>soft</i> word and <code>code</code></div>",
+  "<div>&lt;img src=x onerror=alert(1)&gt;</div>"
+ ],
+ "notes.popover": [
+  false,
+  true,
+  "4,6",
+  true,
+  true,
+  false,
+  false
+ ],
  "notes.shippedkey": [
   null,
   "number"
+ ],
+ "notes.tip": [
+  true,
+  true,
+  "none",
+  "fixed",
+  "fixed"
  ],
  "party.api": [
   [
@@ -586,6 +609,9 @@
   "mode-buttons",
   "note-editor",
   "note-list",
+  "note-party",
+  "note-status",
+  "note-text",
   "notes-mode-status",
   "pan-drag",
   "poll-indicator",

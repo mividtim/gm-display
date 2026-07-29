@@ -548,6 +548,12 @@
     </div>
   </div>
 
+  <!-- Notes, on the map. Hovering a cell peeks; right-click opens the editor
+       against the cell. Both are position:fixed so they escape the canvas
+       wrap's clipping and can sit over the sidebar if the map is wide. -->
+  <div id="gm-note-tip"></div>
+  <div id="gm-note-pop"></div>
+
   <div id="view-image" class="main-view">
     <!-- WYSIWYG sidecar mirror: shows the same cropped + rotated content the
          sidecar window is displaying. -->
