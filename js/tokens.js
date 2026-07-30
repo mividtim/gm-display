@@ -2,7 +2,7 @@
 // The GM side: token roster, per-map placement, rendering, controls.
 import { drawNoteMarkers, initCellNotes, notesOnMapChanged, notesToolChanged } from './cell-notes.js';
 import { rlEncode } from './games.js';
-import { TOKEN_SIDES, cellAtMapPx, cellLabel, clamp01, drawMapGrid, isFlatHex, isHexKey, isParty, kCellH, kCellW, kRegularStepY, kStepY, kTokenDiam, mapDims, relMapSrc, snapNorm, tokenClass, tokenDisplayName, tokenFrac, uid } from './geometry.js';
+import { TOKEN_SIDES, cellAtMapPx, cellLabel, clamp01, isFlatHex, isHexKey, isParty, kCellH, kCellW, kRegularStepY, kStepY, kTokenDiam, mapDims, relMapSrc, snapNorm, tokenClass, tokenDisplayName, tokenFrac, uid } from './geometry.js';
 import { setStatus } from './keyboard.js';
 import { initLegendGM, legendOnMapChanged } from './legend.js';
 import { ensureMarkerLoop } from './markers.js';
@@ -767,18 +767,9 @@ function throttledTokenPush() {
 }
 function renderGMGridOnly() { /* positions already set inline during drag */ }
 
-function drawGMGrid() {
-  const wrap = document.getElementById('gm-canvas-wrap');
-  const gc = document.getElementById('gm-grid-canvas');
-  if (!wrap || !gc) return;
-  const w = wrap.clientWidth, h = wrap.clientHeight;
-  if (!w || !h) return;
-  gc.width = w; gc.height = h;
-  const ctx = gc.getContext('2d'); ctx.clearRect(0, 0, w, h);
-  const { mw, mh } = mapDims();
-  drawMapGrid(ctx, (mx, my) => ({ x: mx / mw * w, y: my / mh * h }), mw, mh, S.tokenGridColor);
-  drawNoteMarkers();          // cells carrying a note get a pip on the same layer
-}
+// The grid and the note pips are one layer with one owner — see
+// drawNoteMarkers, which clears it and draws both.
+function drawGMGrid() { drawNoteMarkers(); }
 
 // ---- GM marker drawing ----
 // The laser is a tool now. This button and the toolbar pick the same one.

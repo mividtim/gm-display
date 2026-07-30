@@ -383,3 +383,23 @@ already see. The toolbar hint covers what the Notes tool does.
 `session.py` step 11 writes a note, empties it, and checks all four places it
 should vanish from — then hovers an empty cell and asserts no tooltip, and
 hovers a noted one and asserts there is.
+
+### One canvas, one owner
+
+`#gm-grid-canvas` carries both the map grid and the note pips. `drawGMGrid()`
+cleared it and drew both; `drawNoteMarkers()` only ever *added* ink. So removing
+a note redrew the survivors straight over the stale gold dot, and the pip and
+the selection ring stayed on screen until something unrelated happened to redraw
+the whole layer. Data gone, UI still showing it.
+
+`drawNoteMarkers()` now owns the layer — clear, grid, pips — and `drawGMGrid()`
+delegates to it. Anything that can make a pip disappear goes through one place.
+
+The `GOLD` probe counts gold pixels on that canvas, because this class of bug is
+invisible to anything that asks the app what it *thinks* is drawn. Verified
+against a faithful reproduction of the original: `1132 → 1721 → 1721` with the
+bug, `184 → 755 → 184` with the fix.
+
+A first attempt at this probe passed against a *partial* reproduction and I
+nearly believed it. A mutation test is only worth the fidelity of the mutation:
+if the reverted code cannot actually ship, it has not proved anything.

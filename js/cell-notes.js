@@ -6,7 +6,7 @@
 // server-side into one markdown file per map, which means it is a real note in
 // the vault — searchable, linkable, editable in Obsidian. Edits made there flow
 // back here, because the server re-reads any file whose mtime changed.
-import { cellAtMapPx, cellCenterMapPx, cellFromLabel, cellLabel, kStepX, kStepY, mapDims, relMapSrc } from './geometry.js';
+import { cellAtMapPx, cellCenterMapPx, cellFromLabel, cellLabel, drawMapGrid, kStepX, kStepY, mapDims, relMapSrc } from './geometry.js';
 import { onPartyNotesChanged, partyNoteCount, partyNotes, partyNotesFor, setPartyNotesMap, startPartyNotesPolling } from './party-notes.js';
 import { S } from './store.js';
 import { isTool, setActiveTool } from './tools.js';
@@ -302,13 +302,21 @@ function attachNotePopDismiss() {
 
 // ------------------------------------------------------------------ paint ---
 // Drawn on the grid canvas, straight after the grid itself.
+// The grid and the note pips share one canvas, so whoever draws must own
+// clearing it. This used to only ADD ink: removing a note redrew the survivors
+// straight over the old dot, which stayed on screen until something else
+// happened to redraw the whole layer. Anything that can make a pip disappear
+// has to go through here.
 export function drawNoteMarkers() {
   const wrap = el('gm-canvas-wrap'), gc = el('gm-grid-canvas');
   if (!wrap || !gc) return;
   const w = wrap.clientWidth, h = wrap.clientHeight;
   if (!w || !h) return;
+  if (gc.width !== w || gc.height !== h) { gc.width = w; gc.height = h; }
   const ctx = gc.getContext('2d');
+  ctx.clearRect(0, 0, w, h);
   const { mw, mh } = mapDims();
+  drawMapGrid(ctx, (mx, my) => ({ x: mx / mw * w, y: my / mh * h }), mw, mh, S.tokenGridColor);
   const m2c = (mx, my) => ({ x: mx / mw * w, y: my / mh * h });
   const r = Math.max(4, Math.min(kStepX(mw), kStepY(mw)) / mw * w * 0.16);
 

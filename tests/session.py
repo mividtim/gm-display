@@ -59,6 +59,21 @@ LIT = """(() => {
   return Math.round(lit / n * 100);
 })()"""
 
+# Gold ink on the GM's grid canvas — the note pips and the selection ring.
+# Counting pixels is the only way to catch "redrawn without clearing": the
+# survivors get painted straight over the stale dot and it stays on screen.
+GOLD = """(() => {
+  const c = document.getElementById('gm-grid-canvas');
+  if (!c || !c.width) return -1;
+  const d = c.getContext('2d', {willReadFrequently: true})
+             .getImageData(0, 0, c.width, c.height).data;
+  let n = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i+3] > 40 && d[i] > 190 && d[i+1] > 140 && d[i+2] < 150) n++;
+  }
+  return n;
+})()"""
+
 # Grid lines drawn by the map key, on the projector's token canvas.
 GRIDPX = """(() => {
   const c = document.getElementById('player-token-canvas');
@@ -368,6 +383,25 @@ async def main():
         await gm.wait_for_timeout(1600)
         ws = await gm.evaluate(read)
         check('7,4' not in ws['server'], 'whitespace counts as empty', json.dumps(ws))
+
+        # The pip and the selection ring must go in real time, not on the next
+        # accidental redraw. The shared canvas is only cleared by one owner.
+        await gm.click('#tool-bar [data-tool="notes"]')
+        await gm.wait_for_timeout(400)
+        empty_gold = await gm.evaluate(GOLD)
+        await gm.evaluate("window.GMD.openNoteAt('8,8', 500, 400)")
+        await gm.wait_for_timeout(300)
+        await typeIn('A pip should appear.')
+        await gm.wait_for_timeout(1500)
+        with_gold = await gm.evaluate(GOLD)
+        check(with_gold > empty_gold, 'writing a note puts gold ink on the map',
+              f'{empty_gold} -> {with_gold}')
+        await typeIn('')
+        await gm.wait_for_timeout(1600)
+        after_gold = await gm.evaluate(GOLD)
+        check(after_gold == empty_gold,
+              'emptying it wipes the pip and ring off the canvas immediately',
+              f'{empty_gold} -> {with_gold} -> {after_gold}')
 
         # Hovering a cell with nothing written must show nothing at all.
         await gm.click('#tool-bar [data-tool="notes"]')
