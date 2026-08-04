@@ -19,6 +19,8 @@ Exits non-zero on the first failure, and says what a GM would have seen.
 import asyncio
 import json
 import sys
+import urllib.error
+import urllib.parse
 import urllib.request
 
 from playwright.async_api import async_playwright
@@ -42,6 +44,32 @@ def cmd(action, file):
         BASE + '/api/command',
         data=json.dumps({'action': action, 'file': file}).encode(),
         headers={'Content-Type': 'application/json'}))
+
+
+def api(path, data=None, remote=False):
+    """(status, parsed body). `remote=True` is a player on the tunnel: the
+    server calls anything carrying X-Forwarded-For remote, which is exactly
+    what ngrok puts on a visitor's request."""
+    headers = {'Content-Type': 'application/json'}
+    if remote:
+        headers['X-Forwarded-For'] = '203.0.113.9'
+    req = urllib.request.Request(
+        BASE + path, data=json.dumps(data).encode() if data is not None else None,
+        headers=headers)
+    try:
+        with urllib.request.urlopen(req) as r:
+            body = r.read()
+            try:
+                return r.status, json.loads(body)
+            except ValueError:
+                return r.status, None
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.loads(e.read())
+        except Exception:
+            return e.code, None
+    except Exception:
+        return 'unreachable', None
 
 
 # How much of the projector canvas is not black? The single number that
@@ -430,7 +458,245 @@ async def main():
             "getComputedStyle(document.getElementById('gm-note-tip')).display") == 'block',
             'a cell that has a note still peeks')
 
-        print('\n12. No JS errors anywhere')
+        # The question this file exists to ask, pointed the other way: not
+        # "can the players see the map" but "can they see anything else".
+        print('\n12. What a player on the tunnel can reach')
+        gm_map = await gm.evaluate("window.GMD.S.lastMapSrc")
+        gm_map = urllib.parse.urlparse(gm_map or '').path
+        s, _ = api('/api/notes?map=' + urllib.parse.quote(gm_map), remote=True)
+        check(s == 403, 'the GM\'s prep notes are refused to a player', str(s))
+        s, d = api('/api/notes?map=' + urllib.parse.quote(gm_map))
+        check(s == 200 and isinstance(d, dict), 'and still readable by the GM', str(s))
+        s, _ = api('/api/maps', remote=True)
+        check(s == 403, 'the vault index is refused to a player', str(s))
+        s, d = api('/api/maps')
+        check(s == 200 and len(d or []) > 0, 'and still listed for the GM', str(s))
+
+        # Any vault image that is not the map on the table, a token portrait or
+        # a legend swatch. Pick one the GM is demonstrably not showing.
+        others = [m['path'] for m in (d or []) if urllib.parse.unquote(m['path'][6:])
+                  not in gm_map and 'legend-icons' not in m['path']]
+        if others:
+            s, _ = api(others[0], remote=True)
+            check(s == 404, 'an unpublished vault image is not served to a player', str(s))
+            s, _ = api(others[0])
+            check(s == 200, 'the GM can still fetch it', str(s))
+
+        print('\n13. Split map: the GM\'s copy and the table\'s')
+        s, frame = api('/api/player_state', remote=True)
+        check((frame or {}).get('payload', {}).get('mapKey') == gm_map,
+              'the frame names the map identity, not just the image',
+              str((frame or {}).get('payload', {}).get('mapKey')))
+
+        # Find a same-size sibling to stand in for the players' copy. A vault
+        # without one is not a failure — there is simply nothing to pair.
+        twin = ''
+        for cand in others:
+            st, res = api('/api/mapkey', {'map': gm_map, 'player': cand})
+            if st == 200:
+                twin = res['player']
+                break
+        if not twin:
+            print('  skip   no same-size second image in this vault to pair with')
+        else:
+            s, frame = api('/api/player_state', remote=True)
+            pay = (frame or {}).get('payload') or {}
+            check(pay.get('imageSrc') == twin, 'a player is served the players\' copy',
+                  str(pay.get('imageSrc')))
+            check(pay.get('mapKey') == gm_map,
+                  'while notes still key on the GM\'s copy', str(pay.get('mapKey')))
+            # The player frame is the player frame wherever it is fetched from.
+            # This used to assert the opposite, which is how the bug shipped: a
+            # player sitting in the room on the GM's own wifi — or the GM opening
+            # the player view to check it — was handed the copy with the Myths on
+            # it, because the decision was made on where the packet came from
+            # rather than on which page was asking.
+            s, frame2 = api('/api/player_state')
+            check((frame2['payload'] or {}).get('imageSrc') == twin,
+                  'a LOCAL fetch of the player frame gets the players\' copy too',
+                  str((frame2['payload'] or {}).get('imageSrc')))
+            check((frame2['payload'] or {}).get('mapKey') == gm_map,
+                  'and still names the GM copy as the identity')
+            s, _ = api(gm_map, remote=True)
+            check(s == 404, 'the GM\'s copy is not fetchable by a player', str(s))
+            s, _ = api(twin, remote=True)
+            check(s == 200, 'the players\' copy is', str(s))
+
+            # And what they write on it has to come back to the GM, under the
+            # GM map's name — the whole point of keying on the identity.
+            api('/api/partynotes', {'map': gm_map, 'cell': '2,3',
+                                    'text': 'a cairn here', 'by': 'Ana'}, remote=True)
+            s, notes = api('/api/partynotes?map=' + urllib.parse.quote(gm_map))
+            wrote = [e['text'] for e in (notes or {}).get('cells', {}).get('2,3', [])]
+            check('a cairn here' in wrote,
+                  'what a player writes reaches the GM\'s copy', str(wrote))
+            api('/api/mapkey', {'map': gm_map, 'player': ''})     # leave it unsplit
+
+        print('\n14. Peeking works whatever tool is selected')
+        # Reading what you wrote about a hex is not an edit, so it should not
+        # cost you a trip to the toolbar first. Only a drag suppresses it.
+        cmd('map', MAP)
+        await gm.wait_for_timeout(3000)
+        api('/api/notes', {'map': MAP, 'cell': '4,6', 'text': 'Sentries on the ridge.'})
+        await gm.evaluate("window.GMD.loadNotes()")
+        await gm.wait_for_timeout(600)
+        pt = await gm.evaluate("""(() => {
+            const G = window.GMD;
+            const r = document.getElementById('gm-canvas-wrap').getBoundingClientRect();
+            const m = G.cellCenterMapPx(G.cellFromLabel('4,6'), G.S.mapWidth, G.S.mapHeight);
+            return {x: r.left + m.x / G.S.mapWidth * r.width,
+                    y: r.top + m.y / G.S.mapHeight * r.height}; })()""")
+        for tool in ['none', 'reveal', 'hide', 'tokens', 'notes', 'marker']:
+            await gm.click(f'#tool-bar [data-tool="{tool}"]')
+            await gm.wait_for_timeout(220)
+            await gm.mouse.move(pt['x'] - 4, pt['y'] - 4)   # a real move, not a jump
+            await gm.mouse.move(pt['x'], pt['y'])
+            await gm.wait_for_timeout(320)
+            d = await gm.evaluate(
+                "getComputedStyle(document.getElementById('gm-note-tip')).display")
+            check(d == 'block', f'the note peeks under the {tool} tool', d)
+
+        print('\n15. The players get the same peek, and only their own notes')
+        # A party note on the same cell the GM has prep on. The player must see
+        # theirs and never the GM's — that cell is the whole test.
+        api('/api/partynotes', {'map': MAP, 'cell': '4,6',
+                                'text': 'We camped here.', 'by': 'Sir Tim'})
+        await gm.evaluate("""(() => {
+            const G = window.GMD;
+            G.S.roster = []; G.S.tokens = [];
+            G.S.roster.push({id: 'pc-a', base: 'Dame Ada', num: 0, color: '#22c55e',
+              img: '', side: 'pc', owner: '', ownerColor: '',
+              tx: 0.2, ty: 0.9, onMap: true, pending: null});
+            G.S.tokens.push(G.S.roster[0]);
+            G.pushTokensToServer(); G.pushPlayerStateToServer(); })()""")
+        await gm.wait_for_timeout(900)
+        rp = await ctx.new_page()
+        rp.on('pageerror', lambda e: errs.append('RP ' + str(e)))
+        rp.on('console', lambda m: errs.append('RP ' + m.text) if m.type == 'error' else None)
+        await rp.goto(BASE + '/remote.html')
+        await rp.wait_for_timeout(1600)
+        await rp.fill('#remote-name', 'Sir Kay')
+        await rp.click('.remote-card')
+        await rp.wait_for_timeout(2200)
+
+        def cell_pt(label):
+            return ("(() => {"
+                    "  const G = window.GMD;"
+                    "  const c = document.getElementById('remote-note-canvas');"
+                    "  const r = c.getBoundingClientRect();"
+                    "  const m = G.cellCenterMapPx(G.cellFromLabel('" + label + "'),"
+                    "    G.S.remoteFrame.width, G.S.remoteFrame.height);"
+                    "  const p = G.remoteMapToCanvas(m.x, m.y);"
+                    "  return {x: r.left + p.x, y: r.top + p.y}; })()")
+
+        # Tapping a hex means "I want to write here": the cursor has to land in
+        # the box. On a phone that is also what raises the keyboard. Use a cell
+        # nobody has written on, so this is about typing and not leftover text.
+        fresh = await rp.evaluate(cell_pt('11,11'))
+        await rp.click('#remote-notes-btn')
+        await rp.wait_for_timeout(400)
+        await rp.mouse.click(fresh['x'], fresh['y'])
+        await rp.wait_for_timeout(500)
+        check(await rp.evaluate("document.activeElement && document.activeElement.id")
+              == 'remote-note-text', "tapping a hex focuses the player's text box")
+        was = await rp.evaluate("document.getElementById('remote-note-text').value")
+        await rp.keyboard.type('Tracks in the mud.')
+        now = await rp.evaluate("document.getElementById('remote-note-text').value")
+        check(now == was + 'Tracks in the mud.',
+              'and typing goes straight in, no second click', repr(was) + ' -> ' + repr(now))
+
+        # Peek with notes mode OFF — and never carrying the GM's prep.
+        cpt = await rp.evaluate(cell_pt('4,6'))
+        await rp.click('#remote-notes-btn')
+        await rp.wait_for_timeout(400)
+        await rp.mouse.move(cpt['x'] - 6, cpt['y'] - 6)
+        await rp.mouse.move(cpt['x'], cpt['y'])
+        await rp.wait_for_timeout(500)
+        tip = await rp.evaluate("""(() => {
+            const t = document.getElementById('remote-note-tip');
+            return [getComputedStyle(t).display, t.innerHTML]; })()""")
+        check(tip[0] == 'block', 'players peek with notes mode off too', tip[0])
+        check('Sir Tim' in tip[1], 'the peek is attributed', tip[1][:120])
+        check('Sentries' not in tip[1],
+              "and never carries the GM's note for that cell", tip[1][:120])
+        await rp.close()
+        api('/api/notes', {'map': MAP, 'cell': '4,6', 'text': ''})
+
+        # A player introduces themselves. The only thing that matters here is
+        # that nothing they sent is anywhere the table can see it until the GM
+        # says so — especially the portrait, which is the whole reason there is
+        # a door rather than an open room.
+        print('\n16. Letting a player in — and what waits outside')
+        import base64 as _b64, zlib as _zl, struct as _st
+
+        def _png(w, h, rgb):
+            def chunk(t, d):
+                c = t + d
+                return _st.pack('>I', len(d)) + c + _st.pack('>I', _zl.crc32(c))
+            raw = b''.join(b'\x00' + bytes(rgb) * w for _ in range(h))
+            return (b'\x89PNG\r\n\x1a\n'
+                    + chunk(b'IHDR', _st.pack('>IIBBBBB', w, h, 8, 2, 0, 0, 0))
+                    + chunk(b'IDAT', _zl.compress(raw)) + chunk(b'IEND', b''))
+        portrait = 'data:image/png;base64,' + _b64.b64encode(_png(32, 32, (200, 60, 60))).decode()
+
+        s, _ = api('/api/pending', remote=True)
+        check(s == 403, 'a player cannot read the GM\'s queue', str(s))
+        s, _ = api('/api/pending/resolve', {'id': 'j1', 'approve': True}, remote=True)
+        check(s == 403, 'nor approve themselves', str(s))
+        s, d = api('/api/join', {'name': 'Ana', 'character': 'Knight',
+                                 'img': 'data:image/png;base64,' + _b64.b64encode(b'<script>').decode()},
+                   remote=True)
+        check(s == 400, 'a portrait that is not an image is refused', str(s))
+        s, d = api('/api/join', {'name': 'Ana', 'character': 'Knight',
+                                 'color': '#39ff14', 'img': portrait}, remote=True)
+        check(s == 200 and d.get('id'), 'a real request is taken', str(d))
+        jid = (d or {}).get('id')
+        s, d = api('/api/join_status?id=' + str(jid), remote=True)
+        check((d or {}).get('state') == 'pending', 'and the player is told to wait')
+        s, doc = api('/api/sync', remote=True)
+        toks = (doc.get('tokens') or {}).get('tokens') or []
+        check(not any(t.get('owner') == 'Ana' for t in toks),
+              'a pending player has no token on the table')
+        s, maps = api('/api/maps')
+        check(not any('Knight' in m['name'] for m in (maps or [])),
+              'and their portrait is not in the vault')
+
+        await gm.wait_for_timeout(3500)
+        vis = await gm.evaluate(
+            "getComputedStyle(document.getElementById('join-queue-wrap')).display")
+        check(vis != 'none', 'the GM sees them at the door', vis)
+        check(await gm.evaluate("""(() => { const e =
+                document.querySelector('#join-queue [data-join] span');
+              return !!e && e.style.backgroundImage.startsWith('url("data:image'); })()"""),
+              'portrait and all, from memory, on the GM\'s page only')
+
+        await gm.evaluate("""(() => { const b = [...document.querySelectorAll('#join-queue button')]
+            .find(x => x.textContent === '✓'); if (b) b.click(); })()""")
+        await gm.wait_for_timeout(1500)
+        s, d = api('/api/join_status?id=' + str(jid), remote=True)
+        check((d or {}).get('state') == 'approved', 'a tick lets them in')
+        s, doc = api('/api/sync', remote=True)
+        mine = [t for t in ((doc.get('tokens') or {}).get('tokens') or [])
+                if t.get('owner') == 'Ana']
+        check(bool(mine) and mine[0]['base'] == 'Knight' and mine[0]['side'] == 'pc',
+              'and only then is there a token, owned by them', str(mine[:1])[:70])
+        check(bool(mine) and str(mine[0].get('img', '')).startswith('/maps/'),
+              'with the portrait finally a real vault image')
+
+        s, d = api('/api/join', {'name': 'Bruce', 'character': 'Rogue', 'img': portrait},
+                   remote=True)
+        jid2 = (d or {}).get('id')
+        await gm.wait_for_timeout(3500)
+        await gm.evaluate("""(() => { const b = [...document.querySelectorAll('#join-queue button')]
+            .find(x => x.textContent === '✗'); if (b) b.click(); })()""")
+        await gm.wait_for_timeout(1200)
+        s, d = api('/api/join_status?id=' + str(jid2), remote=True)
+        check((d or {}).get('state') == 'rejected', 'a cross turns them away')
+        s, maps = api('/api/maps')
+        check(not any('Rogue' in m['name'] for m in (maps or [])),
+              'and the portrait it came with is kept nowhere')
+
+        print('\n17. No JS errors anywhere')
         errs = [e for e in errs if 'favicon' not in e and 'willReadFrequently' not in e]
         check(not errs, 'clean console on both pages', '; '.join(errs[:3]))
 

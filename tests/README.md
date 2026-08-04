@@ -403,3 +403,25 @@ bug, `184 → 755 → 184` with the fix.
 A first attempt at this probe passed against a *partial* reproduction and I
 nearly believed it. A mutation test is only worth the fidelity of the mutation:
 if the reverted code cannot actually ship, it has not proved anything.
+
+### "Have to refresh" is a cache header, not a redraw
+
+Tim reported the pip still needed a page refresh *after* the redraw fix was
+deployed — and a refresh fixing it is the signature of stale code, not of a
+missing repaint: the old build's `drawGMGrid()` cleared the canvas on load,
+which is exactly what a reload triggers.
+
+`server.py` sent **no** `Cache-Control` on `.js`/`.css`, so the browser applied
+heuristic freshness and a plain reload could keep running the previous version.
+It now sends `no-cache, must-revalidate` for the app's own source and
+`no-store` for `/api/*` (map images stay cacheable — they are large and never
+edited in place). The override lives in `end_headers`, and skips any response
+that already set the header itself, so the `.html` branch and the JSON helpers
+are not double-headered. Checked with a real request per content type rather
+than by reading the code.
+
+Separately, removal is now optimistic: clearing a note updates the pip, the
+ring and the editor *immediately* rather than after the 600ms debounce and a
+round-trip, because that is the one edit whose outcome is not in doubt. If the
+save then fails, the map is repainted from the vault, so a lost note comes
+back rather than staying invisibly gone.

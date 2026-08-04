@@ -26,6 +26,10 @@ export function setupRemoteView() {
   renderColorSwatches();
   attachRemoteMarkerHandlers();
   attachRemoteNoteHandler();
+  attachRemoteHover();
+  attachJoinHandlers();
+  // A refresh while waiting should still be waiting, not back at square one.
+  if (localStorage.getItem(JOIN_ID_KEY)) { showWaiting(''); startJoinPolling(); }
   startPartyNotesPolling(4000);
   onPartyNotesChanged(() => { drawRemoteNotePips(); renderRemoteNotePanel(); });
   startLegendPolling(6000);
@@ -52,6 +56,136 @@ function renderColorSwatches() {
     };
     wrap.appendChild(s);
   });
+}
+
+// --- Asking to be let in ---------------------------------------------------
+// A player used to be stuck until the GM had typed their name into a token.
+// Now they introduce themselves. Everything they submit — the character, and
+// the portrait above all — waits in the GM's queue: it is not on the table, not
+// on the projector, and not on any other player's screen until it is let in.
+// The server holds a pending portrait in memory and never gives it a URL, so
+// "waiting" is a fact about where the bytes are, not a disabled button.
+let joinPortrait = '';       // data URL the player picked, not yet sent
+let joinPollTimer = null;
+
+const JOIN_ID_KEY = 'gm-display:remote:join';
+const el = (id) => document.getElementById(id);
+
+function setJoinStatus(t, bad) {
+  const s = el('remote-join-status');
+  if (!s) return;
+  s.textContent = t || '';
+  s.classList.toggle('bad', !!bad);
+}
+
+function attachJoinHandlers() {
+  const pick = el('remote-portrait-btn'), file = el('remote-portrait');
+  if (pick && file && !pick._wired) {
+    pick._wired = true;
+    pick.addEventListener('click', () => file.click());
+    file.addEventListener('change', () => {
+      const f = file.files && file.files[0];
+      if (!f) return;
+      // Say no here rather than after the upload: the server caps this too,
+      // but a phone photo is often over it and a local answer is instant.
+      if (f.size > 2 * 1024 * 1024) {
+        setJoinStatus('That portrait is over 2MB — pick a smaller one.', true);
+        file.value = ''; joinPortrait = '';
+        el('remote-portrait-name').textContent = '';
+        return;
+      }
+      const r = new FileReader();
+      r.onload = () => {
+        joinPortrait = r.result;
+        el('remote-portrait-name').textContent = f.name;
+        setJoinStatus('The GM sees your portrait before anyone else does.');
+      };
+      r.readAsDataURL(f);
+    });
+  }
+  const btn = el('remote-join-btn');
+  if (btn && !btn._wired) { btn._wired = true; btn.addEventListener('click', askToJoin); }
+}
+
+async function askToJoin() {
+  const nameEl = el('remote-name'), charEl = el('remote-character');
+  const name = (nameEl.value || '').trim();
+  const character = (charEl.value || '').trim();
+  if (!name) { nameEl.focus(); nameEl.style.borderColor = '#c0392b'; return; }
+  if (!character) { charEl.focus(); charEl.style.borderColor = '#c0392b'; return; }
+  setJoinStatus('asking…');
+  try {
+    const r = await fetch('/api/join', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, character, color: S.remotePlayerColor, img: joinPortrait }),
+    });
+    const d = await r.json();
+    if (!r.ok) { setJoinStatus(d.error || 'could not ask just now', true); return; }
+    localStorage.setItem('gm-display:remote:name', name);
+    localStorage.setItem('gm-display:remote:color', S.remotePlayerColor);
+    localStorage.setItem(JOIN_ID_KEY, d.id);
+    showWaiting(character);
+    startJoinPolling();
+  } catch (e) {
+    setJoinStatus('could not reach the GM’s server', true);
+  }
+}
+
+function showWaiting(character) {
+  const box = el('remote-new');
+  if (box) box.classList.add('waiting');
+  ['remote-character', 'remote-portrait-btn', 'remote-join-btn']
+    .forEach(id => { const e2 = el(id); if (e2) e2.disabled = true; });
+  setJoinStatus('Waiting for the GM to let ' + (character || 'you') + ' in…');
+}
+
+function clearWaiting() {
+  const box = el('remote-new');
+  if (box) box.classList.remove('waiting');
+  ['remote-character', 'remote-portrait-btn', 'remote-join-btn']
+    .forEach(id => { const e2 = el(id); if (e2) e2.disabled = false; });
+}
+
+export function startJoinPolling() {
+  clearInterval(joinPollTimer);
+  joinPollTimer = setInterval(checkJoinStatus, 2000);
+  checkJoinStatus();
+}
+
+async function checkJoinStatus() {
+  const id = localStorage.getItem(JOIN_ID_KEY);
+  if (!id || S.remoteScreen === 'play') { clearInterval(joinPollTimer); return; }
+  let state = 'unknown';
+  try {
+    const r = await fetch('/api/join_status?id=' + encodeURIComponent(id), { cache: 'no-store' });
+    state = (await r.json()).state;
+  } catch (e) { return; }            // server down; keep waiting rather than lie
+  if (state === 'pending') return;
+  if (state === 'rejected') {
+    clearInterval(joinPollTimer);
+    localStorage.removeItem(JOIN_ID_KEY);
+    clearWaiting();
+    setJoinStatus('The GM did not let that one in. You can change it and ask again.', true);
+    return;
+  }
+  if (state === 'approved') {
+    // The token exists now; the next sync tick brings it. Wait for it rather
+    // than guessing, then walk in through the same door as a manual claim.
+    const myName = localStorage.getItem('gm-display:remote:name') || '';
+    const t = S.tokens.find(x => x.owner && x.owner === myName);
+    if (!t) { setJoinStatus('You’re in — fetching your character…'); return; }
+    clearInterval(joinPollTimer);
+    localStorage.removeItem(JOIN_ID_KEY);
+    clearWaiting();
+    setJoinStatus('');
+    enterPlayWith(t, myName, localStorage.getItem('gm-display:remote:color') || S.remotePlayerColor);
+    return;
+  }
+  // 'unknown' — the server restarted and forgot. Let them ask again.
+  clearInterval(joinPollTimer);
+  localStorage.removeItem(JOIN_ID_KEY);
+  clearWaiting();
+  setJoinStatus('');
 }
 
 // Pick a character profile (+ the chosen color) and enter the play screen.
@@ -235,6 +369,65 @@ function remoteCanvasToMap(x, y) {
   return { x: x / S.remoteScale + S.remoteCrop.x, y: y / S.remoteScale + S.remoteCrop.y };
 }
 
+// Reading what the party has written about a hex should not require tapping it
+// and opening a panel — same reasoning as the GM's peek. Party notes ONLY: the
+// GM's prep is never sent to this page, so there is nothing here to leak.
+let remoteHoverRaf = 0;
+
+function remoteHideTip() {
+  const tip = document.getElementById('remote-note-tip');
+  if (tip) tip.style.display = 'none';
+  if (remoteHoverRaf) { cancelAnimationFrame(remoteHoverRaf); remoteHoverRaf = 0; }
+}
+
+function remoteCellAtClient(cx, cy) {
+  const c = document.getElementById('remote-note-canvas');
+  // remoteCanvasToMap reads S.remoteCrop, so a mousemove that lands before
+  // the first frame arrives must not get that far.
+  if (!c || !S.remoteFrame || !S.remoteCrop || !S.remoteScale || !S.tokenGridEnabled) return '';
+  const r = c.getBoundingClientRect();
+  if (!r.width || cx < r.left || cx > r.right || cy < r.top || cy > r.bottom) return '';
+  const m = remoteCanvasToMap(cx - r.left, cy - r.top);
+  return cellLabel(cellAtMapPx(m.x, m.y, S.remoteFrame.width, S.remoteFrame.height));
+}
+
+function remoteShowTip(label, cx, cy) {
+  const tip = document.getElementById('remote-note-tip');
+  if (!tip) return;
+  const list = partyNotesFor(label);
+  if (!list.length) { remoteHideTip(); return; }
+  const esc = (t) => String(t == null ? '' : t).replace(/[<>&"]/g,
+    ch => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[ch]));
+  tip.innerHTML = '<div class="nt-cell">' + esc(label) + '</div>'
+    + list.map(e => '<div class="nt-party"><b>' + esc(e.by || 'a player') + '</b> '
+        + esc(e.text || '') + '</div>').join('');
+  tip.style.display = 'block';
+  const r = tip.getBoundingClientRect();
+  let x = cx + 14, y = cy + 14;
+  if (x + r.width > window.innerWidth - 8) x = cx - r.width - 14;
+  if (y + r.height > window.innerHeight - 8) y = cy - r.height - 14;
+  tip.style.left = Math.max(8, x) + 'px';
+  tip.style.top = Math.max(8, y) + 'px';
+}
+
+function attachRemoteHover() {
+  const stage = document.getElementById('remote-stage');
+  if (!stage || stage._noteHoverWired) return;
+  stage._noteHoverWired = true;
+  stage.addEventListener('mousemove', (e) => {
+    if (e.buttons) { remoteHideTip(); return; }   // not mid-drag
+    if (remoteHoverRaf) return;
+    remoteHoverRaf = requestAnimationFrame(() => {
+      remoteHoverRaf = 0;
+      const label = remoteCellAtClient(e.clientX, e.clientY);
+      if (!label) { remoteHideTip(); return; }
+      remoteShowTip(label, e.clientX, e.clientY);
+    });
+  });
+  stage.addEventListener('mouseleave', remoteHideTip);
+  stage.addEventListener('pointerdown', remoteHideTip);
+}
+
 function attachRemoteNoteHandler() {
   const c = document.getElementById('remote-note-canvas');
   if (!c || c._wired) return;
@@ -246,12 +439,12 @@ function attachRemoteNoteHandler() {
     const label = cellLabel(cellAtMapPx(m.x, m.y, S.remoteFrame.width, S.remoteFrame.height));
     if (label !== remoteCell) { remoteNoteDraft = null; remoteNoteStatus = ''; }
     remoteCell = label;
-    renderRemoteNotePanel();
+    renderRemoteNotePanel(true);
     drawRemoteNotePips();
   });
 }
 
-function renderRemoteNotePanel() {
+function renderRemoteNotePanel(focusIt) {
   const panel = document.getElementById('remote-note-panel');
   if (!panel) return;
   if (!remoteNotesMode) { panel.innerHTML = ''; return; }
@@ -261,9 +454,11 @@ function renderRemoteNotePanel() {
   }
   const mine = partyNotesFor(remoteCell).find(e => e.by === S.myActorName);
   const others = partyNotesFor(remoteCell).filter(e => e.by !== S.myActorName);
-  const prev = document.getElementById('remote-note-text');
-  const wasFocused = prev && document.activeElement === prev;
-  const caret = prev ? prev.selectionStart : 0;
+  // The 4s poll re-renders this panel. Remember where the caret was so a
+  // re-render never yanks it out of the box mid-sentence.
+  const prevTa = document.getElementById('remote-note-text');
+  const wasFocused = prevTa && document.activeElement === prevTa;
+  const caret = prevTa ? prevTa.selectionStart : 0;
   panel.innerHTML =
     '<div style="font-weight:600;margin-bottom:4px;">Cell ' + remoteCell + '</div>'
     + '<textarea id="remote-note-text" rows="3" placeholder="What did you notice here?"></textarea>'
@@ -281,7 +476,11 @@ function renderRemoteNotePanel() {
   // the player is halfway through typing.
   ta.value = remoteNoteDraft !== null ? remoteNoteDraft : (mine ? mine.text : '');
   ta.addEventListener('input', () => { remoteNoteDraft = ta.value; });
-  if (wasFocused) { ta.focus(); ta.setSelectionRange(caret, caret); }
+  // Tapping a hex means "I want to write here", so put the cursor in the box —
+  // on a phone that is also what raises the keyboard. Re-renders from the poll
+  // pass no flag, so they restore the caret instead of stealing it.
+  if (focusIt) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+  else if (wasFocused) { ta.focus(); ta.setSelectionRange(caret, caret); }
   document.getElementById('remote-note-save').addEventListener('click', async () => {
     remoteNoteStatus = 'saving…';
     document.getElementById('remote-note-status').textContent = remoteNoteStatus;
@@ -351,8 +550,14 @@ function renderRemoteFrame() {
   const img = new Image();
   img.onload = () => {
     S.remoteImg = img; paintRemoteFog(img); renderRemoteTokens(); drawAllMarkers();
-    setPartyNotesMap(S.remoteFrame.imageSrc);
-    setLegendMap(S.remoteFrame.imageSrc);
+    // Key the notes and the legend on the map's IDENTITY, not on the image in
+    // front of us. On a split map those differ: the table is looking at the
+    // players' copy while every sidecar file is named after the GM's. Filing
+    // by the image would put what the players write into a second party-notes
+    // file the GM never opens.
+    const key = S.remoteFrame.mapKey || S.remoteFrame.imageSrc;
+    setPartyNotesMap(key);
+    setLegendMap(key);
     drawRemoteNotePips();
   };
   img.src = S.remoteFrame.imageSrc;
@@ -376,8 +581,14 @@ function paintRemoteFog(img) {
   // Draw only the cropped region of the map (the part outside the map stays black).
   const sx = Math.max(0, crop.x), sy = Math.max(0, crop.y);
   const ex = Math.min(mw, crop.x + crop.w), ey = Math.min(mh, crop.y + crop.h);
+  // Everything here is in the MAP's pixels — the GM image's, which is what the
+  // fog mask, the crop and the grid are all measured in. On a split map we are
+  // drawing a different file, so convert into its pixels on the way into
+  // drawImage. Same framing at a different export size then still registers.
+  const k = (img.naturalWidth && mw) ? img.naturalWidth / mw : 1;
+  const ky = (img.naturalHeight && mh) ? img.naturalHeight / mh : 1;
   if (ex > sx && ey > sy) {
-    ctx.drawImage(img, sx, sy, ex - sx, ey - sy,
+    ctx.drawImage(img, sx * k, sy * ky, (ex - sx) * k, (ey - sy) * ky,
       (sx - crop.x) * scale, (sy - crop.y) * scale, (ex - sx) * scale, (ey - sy) * scale);
   }
   // Fog: hidden cells -> solid black (players never see unrevealed art).

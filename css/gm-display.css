@@ -446,7 +446,8 @@ body {
 /* === Notes on the map === */
 /* Peek on hover, edit in place. The sidebar keeps the index; neither of these
    makes you look away from the map to read what you wrote about it. */
-#gm-note-tip {
+#gm-note-tip,
+#remote-note-tip {
   position: fixed; display: none; z-index: 400;
   max-width: 320px;
   padding: 8px 10px;
@@ -457,15 +458,19 @@ body {
   pointer-events: none;   /* never eats the click it is describing */
 }
 #gm-note-tip .nt-cell,
+#remote-note-tip .nt-cell,
 #gm-note-pop .np-head b { color: #e0c060; font-weight: 700; }
-#gm-note-tip .nt-cell { font-size: 11px; letter-spacing: 0.04em; margin-bottom: 3px; }
+#gm-note-tip .nt-cell,
+#remote-note-tip .nt-cell { font-size: 11px; letter-spacing: 0.04em; margin-bottom: 3px; }
 #gm-note-tip .nt-h { color: #e8d9a8; font-weight: 700; margin-top: 4px; }
 #gm-note-tip .nt-li { padding-left: 10px; text-indent: -7px; }
 #gm-note-tip .nt-li::before { content: "· "; color: #8b7355; }
 #gm-note-tip .nt-gap { height: 5px; }
 #gm-note-tip code { background: #2a2a30; padding: 0 3px; border-radius: 3px; }
-#gm-note-tip .nt-party { margin-top: 4px; color: #cfd6e0; }
-#gm-note-tip .nt-party b { color: #60a5fa; font-weight: 700; }
+#gm-note-tip .nt-party,
+#remote-note-tip .nt-party { margin-top: 4px; color: #cfd6e0; }
+#gm-note-tip .nt-party b,
+#remote-note-tip .nt-party b { color: #60a5fa; font-weight: 700; }
 
 #gm-note-pop {
   position: fixed; display: none; z-index: 401;
@@ -1150,3 +1155,40 @@ body {
   text-shadow: 0 0 3px rgba(0,0,0,0.85), 0 0 3px rgba(0,0,0,0.85);
   pointer-events: none;
 }
+
+/* --- Asking to be let in ------------------------------------------------- */
+/* The player's half of the door. Everything here is a request: the styling
+   should read as "submitted, waiting", not as "done". */
+#remote-new {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid #2a2a30;
+}
+#remote-new.waiting { opacity: 0.75; }
+.remote-new-row {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 14px;
+}
+#remote-portrait-btn {
+  background: #222; color: #ddd; border: 1px solid #444;
+  border-radius: 6px; padding: 9px 12px; font-size: 13px; cursor: pointer;
+  flex: none;
+}
+#remote-portrait-btn:hover:not(:disabled) { background: #2a2a30; border-color: #666; }
+#remote-portrait-name {
+  font-size: 12px; color: #9a9aa2; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+#remote-join-btn {
+  width: 100%; box-sizing: border-box;
+  background: #2c4a2c; color: #d8f0d8; border: 1px solid #4a7a4a;
+  border-radius: 6px; padding: 11px; font-size: 15px; cursor: pointer;
+}
+#remote-join-btn:hover:not(:disabled) { background: #365a36; }
+#remote-new button:disabled, #remote-new input:disabled {
+  opacity: 0.55; cursor: default;
+}
+#remote-join-status {
+  font-size: 12px; color: #9a9aa2; margin-top: 8px; min-height: 1.2em;
+  text-align: center;
+}
+#remote-join-status.bad { color: #e8a0a0; }

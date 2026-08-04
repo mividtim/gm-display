@@ -11,8 +11,10 @@ Architecture:
   - No new tabs ever spawned after initial open
 """
 
+import base64
 import http.server
 import os
+import re
 import sys
 import json
 import urllib.parse
@@ -63,6 +65,98 @@ markers = {}  # id -> stroke
 MARKER_TTL = 6.0  # seconds a stroke lives before it is dropped server-side
 
 
+# ---------------------------------------------------------------------------
+# Players letting themselves in
+# ---------------------------------------------------------------------------
+# A player used to need the GM to make them a token before they could do
+# anything, which meant the first ten minutes of a session were the GM typing
+# names. Now they introduce themselves and wait to be let in.
+#
+# Nothing a player submits is real until the GM says so, and that is enforced
+# HERE rather than by hiding a button: a pending portrait never touches the
+# disk, never gets a /maps/ URL, and is never handed to any surface the table
+# can see. It exists in this process, visible to the GM's own page, until it is
+# approved (written into the vault like any other upload) or dropped.
+pending_players = []          # [{id, name, character, color, img, t}] — img is a data URL
+join_results = {}             # join id -> 'approved' | 'rejected'
+PENDING_CAP = 12              # a queue, not an inbox; refuse the 13th
+JOIN_IMG_CAP = 2 * 1024 * 1024
+_join_seq = [0]
+
+
+def _new_join_id():
+    _join_seq[0] += 1
+    return 'j%d' % _join_seq[0]
+
+
+def decode_image(data_url, cap=JOIN_IMG_CAP):
+    """(raw bytes, extension) for a data: URL that really is an image.
+
+    Returns (None, reason) otherwise. The extension comes from sniffing the
+    bytes, not from anything the sender claimed, and image_size() has to be
+    able to read the header — so a .png that is actually a script is refused
+    here rather than landing in the vault.
+    """
+    s = (data_url or '')
+    if s.startswith('data:'):
+        try:
+            s = s.split(',', 1)[1]
+        except IndexError:
+            return None, 'bad data url'
+    try:
+        raw = base64.b64decode(s)
+    except Exception:
+        return None, 'bad base64'
+    if not raw:
+        return None, 'empty'
+    if len(raw) > cap:
+        return None, 'too large (max %dMB)' % (cap // (1024 * 1024))
+    if raw[:8] == b'\x89PNG\r\n\x1a\n':
+        ext = '.png'
+    elif raw[:2] == b'\xff\xd8':
+        ext = '.jpg'
+    elif raw[:6] in (b'GIF87a', b'GIF89a'):
+        ext = '.gif'
+    elif raw[:4] == b'RIFF' and raw[8:12] == b'WEBP':
+        ext = '.webp'
+    else:
+        return None, 'not an image'
+    tmp = os.path.join('/tmp', '.gmd-probe' + ext)
+    try:
+        with open(tmp, 'wb') as f:
+            f.write(raw)
+        if not image_size(tmp):
+            return None, 'not a readable image'
+    except Exception:
+        return None, 'could not read that image'
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+    return raw, ext
+
+
+def save_to_uploads(basename, raw, ext):
+    """Write bytes into the vault's uploads folder and return its /maps/ path."""
+    safe = ''.join(c for c in (basename or 'portrait')
+                   if c.isalnum() or c in ' ._-()').strip() or 'portrait'
+    upload_dir = os.path.join(STATIC_DIR, 'uploads')
+    os.makedirs(upload_dir, exist_ok=True)
+    candidate, n = safe + ext, 1
+    while os.path.exists(os.path.join(upload_dir, candidate)):
+        candidate = f'{safe}-{n}{ext}'
+        n += 1
+    full = os.path.join(upload_dir, candidate)
+    with open(full, 'wb') as f:
+        f.write(raw)
+    FILE_INDEX.setdefault(candidate, full)
+    for r in IMAGE_ROOTS:
+        if full.startswith(r + os.sep):
+            return '/maps/' + urllib.parse.quote(os.path.relpath(full, r))
+    return '/maps/' + urllib.parse.quote(candidate)
+
+
 def _prune_markers():
     """Drop marker strokes older than MARKER_TTL. Caller holds state_lock."""
     now = time.time()
@@ -71,9 +165,153 @@ def _prune_markers():
         del markers[k]
 
 
+# ---------------------------------------------------------------------------
+# Which vault images a remote player may fetch
+# ---------------------------------------------------------------------------
+# Fog of war hid unrevealed AREAS of the map the GM chose to show. It never had
+# anything to say about the rest of the vault, and /maps/ has always served any
+# file anyone could name — with /api/maps handing out the index to name them
+# from. A player's browser needs exactly three kinds of image: the map in front
+# of them, the portraits on tokens they can already see, and legend swatches.
+# That is the whole list, so that is what remote callers get.
+
+def resolve_map_file(rel_path):
+    """A /maps/ relative path -> an absolute file, or None. Same three-step
+    lookup the handler has always used: each root, then the startup index by
+    partial path, then by bare filename."""
+    for root in IMAGE_ROOTS:
+        full = os.path.join(root, rel_path)
+        if os.path.isfile(full):
+            return full
+    index_key = rel_path.replace('\\', '/')
+    if index_key in FILE_INDEX:
+        return FILE_INDEX[index_key]
+    basename = os.path.basename(rel_path)
+    if basename in FILE_INDEX:
+        return FILE_INDEX[basename]
+    return None
+
+
+def _rel_of(maps_url):
+    """'/maps/A%20B/c.png' -> 'A B/c.png'. '' for anything else (a data: URL,
+    say, which needs no fetch and so needs no permission)."""
+    u = (maps_url or '').split('?')[0]
+    if not u.startswith('/maps/'):
+        return ''
+    return urllib.parse.unquote(u[6:]).replace('\\', '/').strip('/')
+
+
+def published_assets():
+    """The set of vault-relative paths currently published to the table."""
+    with state_lock:
+        frame = player_state['payload'] or {}
+        doc = tokens_state['payload'] or {}
+    out = set()
+    gm_src = frame.get('imageSrc') or ''
+    if gm_src:
+        # On a split map the players' copy is published and the GM's is not,
+        # so a guessed filename does not become a second way in.
+        out.add(_rel_of(notes_api.player_variant(gm_src) or gm_src))
+    for t in (doc.get('tokens') or []):
+        if t.get('img'):
+            out.add(_rel_of(t['img']))
+    out.discard('')
+    return out
+
+
+def may_serve_remote(rel_path):
+    norm = (rel_path or '').replace('\\', '/').strip('/')
+    # Legend swatches are captions for a map the player is already looking at.
+    if norm.startswith(notes_api.SUBDIR + '/legend-icons/'):
+        return True
+    return norm in published_assets()
+
+
+# --- image dimensions, without a dependency --------------------------------
+# The two halves of a split map share one grid calibration, one set of cell
+# addresses and one fog mask, all of which are computed in MAP PIXELS. If the
+# player copy is a different size, every hex silently lands somewhere else. The
+# app ships no imaging library and is not about to grow one, so read the header.
+
+def image_size(path):
+    """(width, height) for PNG/GIF/JPEG/WebP, or None if it can't be read."""
+    try:
+        with open(path, 'rb') as f:
+            head = f.read(32)
+            if head[:8] == b'\x89PNG\r\n\x1a\n':
+                return (int.from_bytes(head[16:20], 'big'),
+                        int.from_bytes(head[20:24], 'big'))
+            if head[:6] in (b'GIF87a', b'GIF89a'):
+                return (int.from_bytes(head[6:8], 'little'),
+                        int.from_bytes(head[8:10], 'little'))
+            if head[:4] == b'RIFF' and head[8:12] == b'WEBP':
+                f.seek(12)
+                chunk = f.read(8)
+                if chunk[:4] == b'VP8X':
+                    b = f.read(10)
+                    return (int.from_bytes(b[4:7], 'little') + 1,
+                            int.from_bytes(b[7:10], 'little') + 1)
+                if chunk[:4] == b'VP8 ':
+                    b = f.read(10)
+                    return (int.from_bytes(b[6:8], 'little') & 0x3fff,
+                            int.from_bytes(b[8:10], 'little') & 0x3fff)
+                if chunk[:4] == b'VP8L':
+                    b = f.read(5)
+                    bits = int.from_bytes(b[1:5], 'little')
+                    return ((bits & 0x3fff) + 1, ((bits >> 14) & 0x3fff) + 1)
+                return None
+            if head[:2] == b'\xff\xd8':          # JPEG: walk the segments
+                f.seek(2)
+                while True:
+                    marker = f.read(2)
+                    if len(marker) < 2 or marker[0] != 0xff:
+                        return None
+                    size = int.from_bytes(f.read(2), 'big')
+                    if 0xc0 <= marker[1] <= 0xcf and marker[1] not in (0xc4, 0xc8, 0xcc):
+                        b = f.read(5)
+                        return (int.from_bytes(b[3:5], 'big'),
+                                int.from_bytes(b[1:3], 'big'))
+                    f.seek(size - 2, 1)
+    except Exception:
+        return None
+    return None
+
+
 class GMHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=STATIC_DIR, **kwargs)
+
+    # Everything the app is actually made of. Without Cache-Control the browser
+    # picks its own heuristic freshness and happily runs yesterday's module for
+    # hours — which is exactly the "have to refresh" report. Map images are NOT
+    # in this list: they are big, they never change, let them cache.
+    APP_SOURCE = ('.html', '.js', '.mjs', '.css', '.map')
+
+    def end_headers(self):
+        """Stamp no-cache on app source, unless the handler already said so.
+
+        The /api/* responses set their own 'no-store' and the .html branch in
+        do_GET sets its own header; checking the buffer first keeps us from
+        sending Cache-Control twice.
+        """
+        try:
+            path = urllib.parse.urlparse(self.path).path
+            want = None
+            if path == '/' or path.endswith(self.APP_SOURCE):
+                want = 'no-cache, must-revalidate'
+            elif path.startswith('/api/') and not path.startswith('/api/image'):
+                # Live state — the map list especially. /api/image is excluded:
+                # those are big and immutable, let the browser keep them.
+                want = 'no-store'
+            if want:
+                already = any(b'cache-control' in h.lower()
+                              for h in getattr(self, '_headers_buffer', []) or [])
+                if not already:
+                    self.send_header('Cache-Control', want)
+        except Exception:
+            # A header quirk must never take the whole server down.
+            pass
+        super().end_headers()
 
     # --- helpers -----------------------------------------------------------
     def is_remote(self):
@@ -145,8 +383,60 @@ class GMHandler(http.server.SimpleHTTPRequestHandler):
         # --- Heavy player frame: map ref + RLE fog + crop + projection ---
         if parsed.path == '/api/player_state':
             with state_lock:
-                out = {'version': player_state['version'], 'payload': player_state['payload']}
-            self._send_json(out)
+                ver = player_state['version']
+                payload = player_state['payload']
+            if payload:
+                payload = dict(payload)
+                gm_src = payload.get('imageSrc') or ''
+                # The map's identity is the GM image, and every sidecar — notes,
+                # party notes, legend, calibration — keys off it. Name it
+                # explicitly so the player page files what it writes under the
+                # same name the GM reads it back from, rather than under
+                # whichever of the two images it happened to be handed.
+                payload['mapKey'] = gm_src
+                variant = notes_api.player_variant(gm_src)
+                payload['split'] = bool(variant)
+                # This endpoint is the PLAYER's frame — remote.html is its only
+                # reader; the GM page only ever POSTs here. So a split map serves
+                # the players' copy to everyone who asks, full stop.
+                #
+                # This used to be conditional on is_remote(), which was the wrong
+                # question: it made who-sees-what depend on where the browser sat
+                # rather than on which page was asking. A player on the GM's own
+                # machine — or the GM opening the player view to check it — was
+                # handed the copy with the Myths on it. "Is this the player view?"
+                # is the only thing that should decide, and for this endpoint the
+                # answer is always yes.
+                if variant:
+                    payload['imageSrc'] = variant
+            self._send_json({'version': ver, 'payload': payload})
+            return
+
+        # --- A player asks how their request is going. Open to remote. ---
+        # Answers with a state and nothing else: knowing your own request was
+        # turned down should not also tell you who else is at the table.
+        if parsed.path == '/api/join_status':
+            q = urllib.parse.parse_qs(parsed.query)
+            jid = (q.get('id') or [''])[0]
+            with state_lock:
+                if any(p['id'] == jid for p in pending_players):
+                    state = 'pending'
+                else:
+                    state = join_results.get(jid, 'unknown')
+            self._send_json({'state': state})
+            return
+
+        # --- The GM's queue of people asking to join. GM only. ---
+        # The portraits ride along as data URLs so the GM can see what they are
+        # actually approving. This is the only place a pending image is ever
+        # served, and it is refused to anyone but this machine.
+        if parsed.path == '/api/pending':
+            if self.is_remote():
+                self._send_json({'error': 'forbidden'}, status=403)
+                return
+            with state_lock:
+                out = [dict(p) for p in pending_players]
+            self._send_json({'pending': out})
             return
 
         # --- GM drains queued player actions (claims / proposed moves) ---
@@ -196,37 +486,20 @@ class GMHandler(http.server.SimpleHTTPRequestHandler):
         if parsed.path.startswith('/maps/'):
             rel_path = urllib.parse.unquote(parsed.path[6:])  # strip /maps/
 
-            # 1) Direct lookup against each root
-            for root in IMAGE_ROOTS:
-                full_path = os.path.join(root, rel_path)
-                if os.path.isfile(full_path):
-                    try:
-                        self.send_file(full_path)
-                    except Exception as e:
-                        print(f"Error serving {full_path}: {e}")
-                        self.send_error(500, f"Error serving file: {e}")
-                    return
-
-            # 2) Fallback: use the startup file index
-            #    Handles partial paths like "Dragonfall Maps/file.jpg" when the
-            #    actual vault path is "Darkmoon Vale/Dragonfall Maps/file.jpg"
-            index_key = rel_path.replace('\\', '/')
-            if index_key in FILE_INDEX:
-                print(f"🔍 Index match: {rel_path} → {FILE_INDEX[index_key]}")
-                try:
-                    self.send_file(FILE_INDEX[index_key])
-                except Exception as e:
-                    self.send_error(500, f"Error: {e}")
+            # A remote player gets what is published to the table and nothing
+            # else. 404 rather than 403: a refusal that distinguishes "not
+            # allowed" from "not there" is itself an index of the vault.
+            if self.is_remote() and not may_serve_remote(rel_path):
+                self.send_error(404, f"Image not found: {rel_path}")
                 return
 
-            # 3) Try just the filename
-            basename = os.path.basename(rel_path)
-            if basename in FILE_INDEX:
-                print(f"🔍 Filename match: {basename} → {FILE_INDEX[basename]}")
+            full_path = resolve_map_file(rel_path)
+            if full_path:
                 try:
-                    self.send_file(FILE_INDEX[basename])
+                    self.send_file(full_path)
                 except Exception as e:
-                    self.send_error(500, f"Error: {e}")
+                    print(f"Error serving {full_path}: {e}")
+                    self.send_error(500, f"Error serving file: {e}")
                 return
 
             # Nothing found — log diagnostics
@@ -234,14 +507,18 @@ class GMHandler(http.server.SimpleHTTPRequestHandler):
             for root in IMAGE_ROOTS:
                 full = os.path.join(root, rel_path)
                 print(f"   {full}  {'✓ EXISTS' if os.path.isfile(full) else '✗'}")
-            print(f"   Index lookup for '{index_key}' — no match")
-            print(f"   Filename lookup for '{basename}' — no match")
+            print(f"   Index lookup for '{rel_path}' — no match")
+            print(f"   Filename lookup for '{os.path.basename(rel_path)}' — no match")
             print()
             self.send_error(404, f"Image not found: {rel_path}")
             return
 
-        # List available maps
+        # List available maps. This is the vault's index — every handout, every
+        # unrevealed map, by name — so it is the GM's alone.
         if parsed.path == '/api/maps':
+            if self.is_remote():
+                self._send_json({'error': 'forbidden'}, status=403)
+                return
             maps = []
             for root in IMAGE_ROOTS:
                 for dirpath, _, filenames in os.walk(root):
@@ -292,6 +569,48 @@ class GMHandler(http.server.SimpleHTTPRequestHandler):
         if notes_api.handle_post(self, parsed):
             return
 
+        # --- Declare (or clear) the players' copy of a split map. GM only. ---
+        # Lives here rather than in notes_api because validating the pair means
+        # resolving both images against the vault, which is this file's job.
+        if parsed.path == '/api/mapkey':
+            if self.is_remote():
+                self._send_json({'error': 'forbidden'}, status=403)
+                return
+            body = self._read_json_body()
+            if not body or not body.get('map'):
+                self._send_json({'error': 'map required'}, status=400)
+                return
+            if not notes_api.notes_dir():
+                self._send_json({'error': 'no vault'}, status=503)
+                return
+            gm_src = body['map']
+            player = (body.get('player') or '').strip()
+            if player:
+                player_url = notes_api._as_maps_url(player)
+                gm_file = resolve_map_file(_rel_of(gm_src))
+                pl_file = resolve_map_file(_rel_of(player_url))
+                if not pl_file:
+                    self._send_json({'error': 'that image is not in the vault'}, status=404)
+                    return
+                # Both halves are addressed in map pixels — same hexes, same
+                # cell labels, same fog mask. Different dimensions would put
+                # every note a little to the left of what it describes, and
+                # would do it silently, so refuse the pair instead.
+                gm_dim, pl_dim = image_size(gm_file or ''), image_size(pl_file)
+                if gm_dim and pl_dim and gm_dim != pl_dim:
+                    self._send_json({
+                        'error': 'size mismatch',
+                        'detail': (f'The GM map is {gm_dim[0]}×{gm_dim[1]} and that one is '
+                                   f'{pl_dim[0]}×{pl_dim[1]}. Both copies have to be the same '
+                                   'size — they share one grid, so the hexes have to line up.'),
+                    }, status=409)
+                    return
+                player = player_url
+            with notes_api._lock:
+                path = notes_api.write_key(gm_src, {'player': player})
+            self._send_json({'ok': True, 'player': player, 'file': path or ''})
+            return
+
         # --- GM pushes authoritative token doc (local only) ---
         if parsed.path == '/api/tokens_state':
             if self.is_remote():
@@ -340,6 +659,91 @@ class GMHandler(http.server.SimpleHTTPRequestHandler):
             self._send_json({'ok': True})
             return
 
+        # --- A player introduces themselves. Open to remote. ---
+        # This does not create anything. It puts a card in the GM's queue.
+        if parsed.path == '/api/join':
+            body = self._read_json_body()
+            if not body:
+                self._send_json({'error': 'bad body'}, status=400)
+                return
+            name = str(body.get('name') or '').strip()[:40]
+            character = str(body.get('character') or '').strip()[:40]
+            color = str(body.get('color') or '').strip()[:16]
+            if not name or not character:
+                self._send_json({'error': 'a name and a character are both required'},
+                                status=400)
+                return
+            if not re.match(r'^#[0-9a-fA-F]{6}$', color):
+                color = '#39ff14'
+            img = ''
+            if body.get('img'):
+                raw, ext = decode_image(body['img'])
+                if raw is None:
+                    self._send_json({'error': 'that portrait did not work: ' + ext},
+                                    status=400)
+                    return
+                # Kept in memory, deliberately. On disk it would be one guessed
+                # URL away from the projector; a /maps/ path would put it on
+                # every screen at the table before the GM had seen it.
+                img = 'data:image/%s;base64,%s' % (
+                    ext.lstrip('.'), base64.b64encode(raw).decode())
+            with state_lock:
+                if len(pending_players) >= PENDING_CAP:
+                    self._send_json({'error': 'the GM has too many requests waiting'},
+                                    status=429)
+                    return
+                # One request per person: asking twice replaces the first rather
+                # than filling the GM's queue with the same player.
+                for old in [p for p in pending_players if p['name'].lower() == name.lower()]:
+                    pending_players.remove(old)
+                    join_results.pop(old['id'], None)
+                jid = _new_join_id()
+                pending_players.append({
+                    'id': jid, 'name': name, 'character': character,
+                    'color': color, 'img': img, 't': time.time(),
+                })
+            print(f"🙋 {name} asks to join as {character}"
+                  f"{' (with a portrait)' if img else ''}")
+            self._send_json({'ok': True, 'id': jid})
+            return
+
+        # --- GM lets someone in, or does not. GM only. ---
+        if parsed.path == '/api/pending/resolve':
+            if self.is_remote():
+                self._send_json({'error': 'forbidden'}, status=403)
+                return
+            body = self._read_json_body() or {}
+            jid = str(body.get('id') or '')
+            approve = bool(body.get('approve'))
+            with state_lock:
+                rec = next((p for p in pending_players if p['id'] == jid), None)
+                if rec:
+                    pending_players.remove(rec)
+                    join_results[jid] = 'approved' if approve else 'rejected'
+                    if len(join_results) > 200:
+                        for k in list(join_results)[:100]:
+                            del join_results[k]
+            if not rec:
+                self._send_json({'error': 'no such request'}, status=404)
+                return
+            if not approve:
+                # The bytes go with it. Nothing rejected is kept anywhere.
+                print(f"🚫 turned away: {rec['name']} as {rec['character']}")
+                self._send_json({'ok': True, 'approved': False})
+                return
+            # Only now does the portrait become a real file in the vault.
+            img_path = ''
+            if rec.get('img'):
+                raw, ext = decode_image(rec['img'])
+                if raw is not None:
+                    img_path = save_to_uploads(rec['character'], raw, ext)
+            print(f"✅ let in: {rec['name']} as {rec['character']}")
+            self._send_json({'ok': True, 'approved': True, 'player': {
+                'name': rec['name'], 'character': rec['character'],
+                'color': rec['color'], 'img': img_path,
+            }})
+            return
+
         # --- Ephemeral marker stroke (neon "laser pointer"). Anyone may post. ---
         # Body: {id, by, color, points:[[tx,ty],...]}. Re-posting the same id
         # extends the stroke; the server stamps a fresh timestamp each time.
@@ -366,7 +770,6 @@ class GMHandler(http.server.SimpleHTTPRequestHandler):
             if not body or not body.get('data') or not body.get('name'):
                 self._send_json({'error': 'bad body'}, status=400)
                 return
-            import base64
             name = os.path.basename(body['name'])
             # sanitize: keep letters/digits/space/dash/underscore/dot
             name = ''.join(c for c in name if c.isalnum() or c in ' ._-()').strip()

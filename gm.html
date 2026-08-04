@@ -131,6 +131,12 @@
     <summary>Fog Tools</summary>
     <div class="sb-body">
       <div id="gm-toolbar">
+        <!-- You are looking at art the table cannot see. Say so, here, where
+             you are already looking — the failure mode of a split map is
+             describing a Myth that is not on their copy. -->
+        <div id="split-badge" style="display:none;width:100%;margin-bottom:6px;padding:4px 6px;
+             background:#2a2214;border:1px solid #8a6a1e;border-radius:3px;
+             color:#ffe6a8;font-size:11px;">⚑ Split map — the table sees their own copy</div>
         <!-- Map Fog / Image Fog buttons removed: the active library entry IS
              the editing target. Click an entry to switch what you're editing. -->
         <div class="row" style="width:100%;">
@@ -415,6 +421,23 @@
         <div style="font-size:11px;color:#888;margin-top:6px;">
           With this panel open, arrow keys nudge the origin by 1px (Shift ×10, Alt ×0.1).
         </div>
+
+        <!-- Split map: your copy, and the one the table sees. -->
+        <div style="border-top:1px solid #333;padding-top:8px;margin-top:10px;">
+          <label>Players' copy of this map</label>
+          <div style="display:flex;gap:4px;margin-bottom:4px;">
+            <select id="split-player-map" style="flex:1;min-width:0;background:#222;color:#eee;border:1px solid #444;border-radius:3px;padding:4px;font-size:11px;">
+              <option value="">Not split — the table sees my map</option>
+            </select>
+            <button data-act="b71" title="Reload images from your vault" style="padding:4px 6px;">↻</button>
+          </div>
+          <div id="split-status" style="font-size:11px;color:#888;"></div>
+          <div style="font-size:11px;color:#888;margin-top:4px;">
+            For a map you have two copies of — yours with the Myths and Holdings
+            drawn on, theirs without. Still one map: same hexes, same notes, same
+            tokens, same fog. Both copies must be the same pixel size.
+          </div>
+        </div>
       </div>
     </div>
   </details>
@@ -478,6 +501,17 @@
           <option value="npc">NPC / Enemy</option>
         </select>
         <button data-act="b64" class="primary" style="background:#6a4;border-color:#8c6;color:#fff;">+ Add</button>
+      </div>
+
+      <!-- People asking to be let in. Hidden until someone is. The portrait
+           shown here is the only place a pending one exists — it has no URL
+           and reaches no other screen until you say ✓. -->
+      <div id="join-queue-wrap" style="display:none;margin-bottom:8px;">
+        <label>Asking to join</label>
+        <div id="join-queue" style="display:flex;flex-direction:column;gap:4px;"></div>
+        <div style="font-size:10px;color:#888;margin-top:4px;">
+          ✓ makes them a PC token on this map, owned by them. ✗ discards it, portrait and all.
+        </div>
       </div>
 
       <!-- The party as a single piece. One per campaign, on every map. -->

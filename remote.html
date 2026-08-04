@@ -17,6 +17,21 @@
       </div>
       <div class="remote-pick-label">Pick your character</div>
       <div id="remote-roster"><div class="remote-empty">Waiting for the GM…</div></div>
+
+      <!-- ...or bring your own. Nothing here is real until the GM lets you in:
+           the character, and the portrait especially, sit in the GM's queue
+           and reach no screen at the table until they say so. -->
+      <div id="remote-new">
+        <div class="remote-pick-label">…or add your own</div>
+        <input type="text" id="remote-character" placeholder="Character name" autocomplete="off">
+        <div class="remote-new-row">
+          <button id="remote-portrait-btn" type="button">Add a portrait</button>
+          <span id="remote-portrait-name"></span>
+          <input type="file" id="remote-portrait" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
+        </div>
+        <button id="remote-join-btn" class="primary">Ask to join</button>
+        <div id="remote-join-status"></div>
+      </div>
     </div>
   </div>
   <div id="remote-stage" >
@@ -26,6 +41,9 @@
     <div id="remote-token-layer"></div>
     <canvas id="remote-note-canvas"></canvas>
   </div>
+  <!-- Hover peek at what the party wrote on a hex. Party notes only — the
+       GM's prep never reaches this page. -->
+  <div id="remote-note-tip"></div>
   <div id="remote-note-panel"></div>
   <div id="remote-legend-panel"></div>
   <div id="remote-bar" >

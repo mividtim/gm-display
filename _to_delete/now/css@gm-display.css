@@ -1,0 +1,1157 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { overflow: hidden; height: 100vh; }
+body {
+  background: #1a1a1a;
+  color: #e0e0e0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  overflow: hidden;
+  height: 100vh;
+  user-select: none;
+  display: flex;
+  flex-direction: column;
+}
+
+/* === Sidebar + main content shell === */
+#app {
+  display: flex;
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+}
+#app.player-mode { display: none; } /* hide GM shell entirely in player windows */
+
+#sidebar {
+  width: 320px;
+  flex-shrink: 0;
+  background: #1d1d1d;
+  border-right: 1px solid #333;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  min-width: 32px;
+}
+#sidebar-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+#sidebar.collapsed { width: 36px !important; }
+#sidebar.collapsed #sidebar-content { display: none; }
+#sidebar.collapsed #sidebar-resize-handle { display: none; }
+
+/* Drag handle on the right edge — invisible, 5px wide, ew-resize cursor. */
+#sidebar-resize-handle {
+  position: absolute;
+  top: 0; right: 0;
+  width: 5px;
+  height: 100%;
+  cursor: ew-resize;
+  z-index: 50;
+  background: transparent;
+}
+#sidebar-resize-handle:hover, #sidebar-resize-handle.dragging {
+  background: #6a4;
+  opacity: 0.5;
+}
+
+/* Collapse / expand toggle */
+#sidebar-collapse-btn {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  width: 22px;
+  height: 22px;
+  background: #2a2a2a;
+  border: 1px solid #555;
+  color: #aaa;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 11px;
+  z-index: 60;
+  padding: 0;
+  line-height: 1;
+}
+#sidebar-collapse-btn:hover { background: #3a3a3a; color: #ddd; }
+#sidebar.collapsed #sidebar-collapse-btn {
+  top: 8px;
+  right: 7px;
+}
+#sidebar-header {
+  padding: 12px 14px;
+  border-bottom: 1px solid #333;
+  background: #222;
+}
+#sidebar-header h1 {
+  font-size: 16px;
+  font-weight: 500;
+  color: #cdd;
+  margin: 0;
+}
+#sidebar-header .pulse-row {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #6a4;
+}
+
+.sb-section {
+  border-bottom: 1px solid #2a2a2a;
+}
+.sb-section > summary {
+  padding: 10px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #aaa;
+  cursor: pointer;
+  list-style: none;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  background: #232323;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.sb-section > summary::-webkit-details-marker { display: none; }
+.sb-section > summary::after {
+  content: '▸';
+  color: #555;
+  font-size: 10px;
+  transition: transform 0.15s ease;
+}
+.sb-section[open] > summary::after { transform: rotate(90deg); }
+.sb-section > summary:hover { background: #2a2a2a; color: #ddd; }
+.sb-body {
+  padding: 10px 14px 14px;
+  font-size: 12px;
+}
+.sb-body label { color: #ccc; font-size: 11px; display: block; margin-top: 8px; }
+.sb-body input[type=range] { width: 100%; }
+.sb-body .val { color: #888; font-size: 10px; float: right; }
+.sb-body button {
+  background: #444; border: 1px solid #666; color: #eee;
+  padding: 4px 10px; border-radius: 4px; cursor: pointer;
+  font-size: 12px;
+}
+.sb-body button:hover { background: #555; }
+.sb-body button.active { background: #6a4; border-color: #8c6; color: #fff; }
+.sb-body .row { display: flex; gap: 4px; flex-wrap: wrap; }
+.sb-body .row > * { flex: 1; min-width: 0; }
+.sb-body .row.tight { gap: 2px; }
+
+#main-content {
+  flex: 1;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #111;
+}
+
+.main-view {
+  flex: 1;
+  width: 100%;
+  display: none;
+  align-items: safe center;
+  justify-content: safe center;
+  overflow: auto;
+  position: relative;
+}
+.main-view.active { display: flex; }
+
+#view-idle .welcome {
+  max-width: 560px;
+  text-align: center;
+  color: #888;
+  padding: 32px;
+}
+#view-idle .welcome h2 {
+  color: #aaa;
+  font-weight: 300;
+  font-size: 24px;
+  margin-bottom: 12px;
+}
+#view-idle .welcome p { line-height: 1.6; margin-top: 10px; font-size: 13px; }
+#view-idle .welcome code { background: #222; padding: 1px 6px; border-radius: 3px; }
+
+/* --- Mode: Image Display (GM preview) --- */
+#image-display {
+  display: none;
+  width: 100vw;
+  height: 100vh;
+  justify-content: center;
+  align-items: center;
+  background: #111;
+  position: relative;
+}
+#image-preview-wrap {
+  position: relative;
+  display: inline-block;
+  max-width: 90%;
+  max-height: 85%;
+}
+#image-display img {
+  display: block;
+  max-width: 100%;
+  max-height: 85vh;
+  object-fit: contain;
+  border: 1px solid #333;
+}
+#image-info {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  background: rgba(30,30,30,0.92);
+  border: 1px solid #555;
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-size: 13px;
+  z-index: 1000;
+  backdrop-filter: blur(6px);
+}
+#image-info .filename { color: #aaa; margin-bottom: 4px; }
+#image-info .label { color: #6a4; font-weight: 500; }
+
+/* --- Mode: Fog of War (GM View) --- */
+#fog-gm {
+  display: none;
+  width: 100vw;
+  height: 100vh;
+  position: relative;
+}
+#gm-toolbar {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  z-index: 1000;
+  background: rgba(30,30,30,0.92);
+  border: 1px solid #555;
+  border-radius: 8px;
+  padding: 10px 14px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 13px;
+  backdrop-filter: blur(6px);
+  flex-wrap: wrap;
+  max-width: calc(100vw - 20px);
+}
+#gm-toolbar label { color: #ccc; }
+#gm-toolbar input[type=range] { width: 80px; }
+#gm-toolbar button {
+  background: #444;
+  border: 1px solid #666;
+  color: #eee;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+#gm-toolbar button:hover { background: #555; }
+#gm-toolbar button.active { background: #6a4; border-color: #8c6; color: #fff; }
+#btn-sync-now { background: #c63; border-color: #e85; color: #fff; }
+#btn-sync-now:hover { background: #e74; }
+#btn-sync-now.pending { animation: pulse-sync 1.5s ease-in-out infinite; }
+@keyframes pulse-sync { 0%,100% { background: #c63; } 50% { background: #e85; } }
+#gm-toolbar .sep { width: 1px; height: 20px; background: #555; }
+#brush-preview {
+  width: 24px; height: 24px;
+  border: 2px solid #aaa;
+  border-radius: 50%;
+  display: inline-block;
+}
+.toolbar-val { color: #888; font-size: 11px; min-width: 28px; text-align: center; }
+
+#gm-canvas-container {
+  width: 100%; height: 100%;
+  overflow: auto;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+/* Canvas sizing:
+   - The wrap is inline-block and gets explicit pixel width/height set by
+     fitCanvasToView() based on the available main-content area.
+   - Both canvases display at the wrap's size (CSS px), independent of their
+     intrinsic pixel dims (mapWidth × mapHeight). paintAt uses
+     getBoundingClientRect to translate cursor coords back to pixel coords,
+     so painting still works at any display scale. */
+#gm-canvas-wrap { position: relative; display: inline-block; overflow: visible; }
+#gm-map-canvas, #gm-fog-canvas {
+  position: absolute; top: 0; left: 0;
+  width: 100%; height: 100%;
+}
+#gm-map-canvas { position: relative; }
+
+/* Viewport outline on GM canvas (shows what projector sees) */
+#viewport-outline, #image-viewport-outline {
+  position: absolute;
+  border: 2px dashed #6a4;
+  pointer-events: none;
+  z-index: 10;
+  display: none;
+  box-shadow: 0 0 0 9999px rgba(0,0,0,0.25);
+}
+
+/* Crop panel */
+#crop-panel { top: 60px; right: 10px; width: 280px; display: none; }
+#crop-panel label { color: #ccc; font-size: 12px; display: block; margin-top: 6px; }
+#crop-panel input[type=range] { width: 100%; }
+#crop-panel .val { color: #888; font-size: 11px; float: right; }
+#crop-panel button {
+  background: #444; border: 1px solid #666; color: #eee;
+  padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;
+  margin-top: 4px;
+}
+
+/* Keystone corner controls */
+.corner-group { display: flex; align-items: center; gap: 4px; margin: 4px 0; }
+.corner-label { color: #aaa; font-size: 11px; width: 24px; text-align: right; }
+.corner-btn {
+  background: #444; border: 1px solid #555; color: #ddd;
+  width: 26px; height: 26px; border-radius: 3px; cursor: pointer;
+  font-size: 14px; line-height: 1; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+.corner-btn:hover { background: #555; }
+.corner-btn:active { background: #6a4; }
+.corner-vals { color: #888; font-size: 10px; min-width: 50px; text-align: center; }
+/* Joystick drag pad for keystone corners */
+.corner-drag {
+  width: 44px; height: 44px; border-radius: 50%;
+  background: radial-gradient(circle, #555 40%, #333 100%);
+  border: 2px solid #666;
+  cursor: crosshair;
+  display: flex; align-items: center; justify-content: center;
+  color: #999; font-size: 18px;
+  user-select: none; touch-action: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.corner-drag:hover { border-color: #6a4; }
+.corner-drag.dragging { border-color: #8f6; box-shadow: 0 0 8px rgba(102,170,68,0.5); background: radial-gradient(circle, #484 40%, #333 100%); }
+
+/* Pan joystick — same pattern as corner-drag, larger for the panning use case */
+.pan-drag {
+  width: 64px; height: 64px; border-radius: 50%;
+  background: radial-gradient(circle, #555 40%, #333 100%);
+  border: 2px solid #666;
+  cursor: grab;
+  display: flex; align-items: center; justify-content: center;
+  color: #999; font-size: 22px;
+  user-select: none; touch-action: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.pan-drag:hover { border-color: #6a4; }
+.pan-drag.dragging {
+  cursor: grabbing;
+  border-color: #8f6;
+  box-shadow: 0 0 8px rgba(102,170,68,0.5);
+  background: radial-gradient(circle, #484 40%, #333 100%);
+}
+
+/* --- Panels --- */
+.tool-panel {
+  position: fixed;
+  background: rgba(30,30,30,0.95);
+  border: 1px solid #555;
+  border-radius: 8px;
+  padding: 12px;
+  z-index: 1000;
+  backdrop-filter: blur(6px);
+}
+#text-overlay-panel { bottom: 50px; right: 10px; width: 400px; max-height: 300px; display: none; }
+#text-overlay-panel textarea {
+  width: 100%; height: 120px;
+  background: #222; color: #eee;
+  border: 1px solid #444; border-radius: 4px;
+  padding: 8px;
+  font-family: Georgia, serif; font-size: 14px;
+  resize: vertical;
+}
+#text-overlay-panel .btn-row { display: flex; gap: 8px; margin-top: 8px; }
+#text-overlay-panel button {
+  background: #444; border: 1px solid #666; color: #eee;
+  padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 13px;
+}
+#text-overlay-panel button.primary { background: #6a4; border-color: #8c6; }
+
+/* Rotation controls (inside projection panel) */
+.rotation-row { display: flex; gap: 4px; margin-top: 4px; }
+.rotation-row button {
+  flex: 1;
+  background: #444; border: 1px solid #666; color: #eee;
+  padding: 4px 6px; border-radius: 4px; cursor: pointer; font-size: 12px;
+}
+.rotation-row button:hover { background: #555; }
+.rotation-row button.active { background: #6a4; border-color: #8c6; color: #fff; }
+
+/* Keystone + Grid panel */
+#projection-panel { bottom: 50px; left: 10px; width: 300px; display: none; }
+#projection-panel label { color: #ccc; font-size: 12px; display: block; margin-top: 8px; }
+#projection-panel input[type=range] { width: 100%; }
+#projection-panel .val { color: #888; font-size: 11px; float: right; }
+#projection-panel button {
+  background: #444; border: 1px solid #666; color: #eee;
+  padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;
+  margin-top: 4px;
+}
+
+/* --- Player View (separate window) --- */
+#player-view {
+  display: none;
+  width: 100vw; height: 100vh;
+  background: #000;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  overflow: hidden;
+}
+/* Outer rotation wrap — applies rotation around center.
+   Keystone is applied separately on the inner #player-canvas-wrap. */
+#player-rotation-wrap {
+  position: relative;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  transform-origin: center center;
+}
+#player-canvas-wrap {
+  position: relative;
+  display: inline-block;
+  transform-origin: center center;
+}
+#player-canvas { background: #000; display: block; }
+#player-grid-canvas {
+  position: absolute; top: 0; left: 0;
+  pointer-events: none;
+}
+#player-text-overlay {
+  position: fixed;
+  bottom: 40px; left: 50%;
+  transform: translateX(-50%);
+  max-width: 80%;
+  background: rgba(0,0,0,0.85);
+  color: #f0e8d0;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 28px; line-height: 1.5;
+  padding: 24px 36px;
+  border: 2px solid #8b7355;
+  border-radius: 8px;
+  text-align: center;
+  display: none; z-index: 100;
+}
+
+/* === Notes on the map === */
+/* Peek on hover, edit in place. The sidebar keeps the index; neither of these
+   makes you look away from the map to read what you wrote about it. */
+#gm-note-tip,
+#remote-note-tip {
+  position: fixed; display: none; z-index: 400;
+  max-width: 320px;
+  padding: 8px 10px;
+  background: rgba(14,14,18,0.96);
+  border: 1px solid #6b5a33; border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.6);
+  font: 12px/1.45 system-ui, sans-serif; color: #ddd;
+  pointer-events: none;   /* never eats the click it is describing */
+}
+#gm-note-tip .nt-cell,
+#remote-note-tip .nt-cell,
+#gm-note-pop .np-head b { color: #e0c060; font-weight: 700; }
+#gm-note-tip .nt-cell,
+#remote-note-tip .nt-cell { font-size: 11px; letter-spacing: 0.04em; margin-bottom: 3px; }
+#gm-note-tip .nt-h { color: #e8d9a8; font-weight: 700; margin-top: 4px; }
+#gm-note-tip .nt-li { padding-left: 10px; text-indent: -7px; }
+#gm-note-tip .nt-li::before { content: "· "; color: #8b7355; }
+#gm-note-tip .nt-gap { height: 5px; }
+#gm-note-tip code { background: #2a2a30; padding: 0 3px; border-radius: 3px; }
+#gm-note-tip .nt-party,
+#remote-note-tip .nt-party { margin-top: 4px; color: #cfd6e0; }
+#gm-note-tip .nt-party b,
+#remote-note-tip .nt-party b { color: #60a5fa; font-weight: 700; }
+
+#gm-note-pop {
+  position: fixed; display: none; z-index: 401;
+  width: 320px;
+  padding: 10px;
+  background: #1b1b20;
+  border: 1px solid #6b5a33; border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.7);
+}
+#gm-note-pop .np-head {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+  font: 13px/1 system-ui, sans-serif;
+}
+#gm-note-pop .np-status { flex: 1; font-size: 10px; color: #888; }
+#gm-note-pop .np-close {
+  flex: none; padding: 2px 7px; font-size: 12px; cursor: pointer;
+  background: #2a2a30; color: #ddd; border: 1px solid #444; border-radius: 4px;
+}
+#gm-note-pop textarea {
+  width: 100%; box-sizing: border-box; resize: vertical;
+  background: #222; color: #eee; border: 1px solid #555; padding: 7px;
+  font: 13px/1.45 system-ui, sans-serif;
+}
+
+/* === Legend — the map's own caption === */
+/* One set of row styles for all three surfaces; only the scale differs. */
+.lg-group {
+  font: 700 10px/1 system-ui, sans-serif;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: #8b7355;
+  margin: 8px 0 4px;
+}
+.lg-group:first-child { margin-top: 0; }
+.lg-row {
+  display: flex; align-items: center; gap: 7px;
+  padding: 2px 0;
+}
+.lg-icon {
+  flex: none;
+  width: 22px; height: 22px;
+  border-radius: 3px;
+  background-size: cover; background-position: center;
+  border: 1px solid rgba(0,0,0,0.5);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.12);
+}
+.lg-icon-none { background: none; border: none; box-shadow: none; }
+.lg-text { font-size: 12px; line-height: 1.35; }
+.lg-text b { color: #e0c060; }
+.lg-gloss { color: #bbb; }
+
+/* GM sidebar */
+.legend-list { padding-right: 2px; }
+
+/* Projector: a corner card, outside the rotation wrap so it stays upright and
+   readable however the projector is keystoned. */
+/* --lg-scale is driven from JS: the box shrinks its own type until every entry
+   fits. A wall display cannot be scrolled, so anything clipped here is simply
+   information the table never receives. */
+#player-legend {
+  position: fixed;
+  right: 24px; bottom: 24px;
+  max-width: 52vw; max-height: 88vh; overflow: hidden;
+  background: rgba(0,0,0,0.82);
+  border: 2px solid #8b7355; border-radius: 8px;
+  padding: 14px 20px;
+  display: none; z-index: 99;
+  --lg-scale: 1;
+  column-width: calc(19em * var(--lg-scale)); column-gap: 26px;
+}
+#player-legend .lg-inner { display: contents; }
+#player-legend .lg-row { padding: calc(3px * var(--lg-scale)) 0; break-inside: avoid; }
+#player-legend .lg-group { break-inside: avoid; break-after: avoid;
+  font-size: calc(11px * var(--lg-scale)); margin: calc(10px * var(--lg-scale)) 0 calc(4px * var(--lg-scale)); }
+#player-legend .lg-icon { width: calc(30px * var(--lg-scale)); height: calc(30px * var(--lg-scale)); }
+#player-legend .lg-text { font-size: calc(18px * var(--lg-scale)); }
+#player-legend .lg-text b { color: #f0d890; }
+#player-legend .lg-gloss { color: #d8cdb4; }
+
+/* Players' page: a sheet above the bottom bar, same place the notes panel uses */
+#remote-legend-panel {
+  display: none;
+  position: absolute; left: 0; right: 0; bottom: 46px;
+  max-height: 52vh; overflow-y: auto;
+  padding: 10px 12px 14px;
+  background: #16161a; border-top: 1px solid #333;
+}
+#remote-legend-panel .lg-icon { width: 26px; height: 26px; }
+#remote-legend-panel .lg-text { font-size: 13px; }
+#player-image {
+  max-width: 100%; max-height: 100%;
+  object-fit: contain;
+  display: none;
+}
+
+/* --- Landing --- */
+#landing {
+  display: flex; flex-direction: column;
+  justify-content: center; align-items: center;
+  height: 100vh; gap: 16px;
+}
+#landing h1 { font-size: 28px; font-weight: 300; color: #aaa; }
+#landing .subtitle { color: #666; font-size: 14px; margin-bottom: 10px; }
+.drop-zone {
+  width: 400px; height: 120px;
+  border: 2px dashed #555; border-radius: 12px;
+  display: flex; flex-direction: column;
+  justify-content: center; align-items: center;
+  cursor: pointer; transition: border-color 0.2s; gap: 8px;
+}
+.drop-zone:hover, .drop-zone.dragover { border-color: #6a4; }
+.drop-zone span { color: #888; font-size: 15px; }
+.drop-zone small { color: #555; font-size: 12px; }
+
+.btn { background:#333;border:1px solid #555;color:#ddd;padding:10px 24px;border-radius:6px;cursor:pointer;font-size:14px; }
+.btn:hover { background:#444;border-color:#888; }
+.btn-sm { padding:4px 12px;font-size:13px; }
+
+#mode-buttons { display: flex; gap: 12px; }
+
+.setup-row { display: flex; gap: 16px; align-items: stretch; }
+.setup-section {
+  background: #252525; border: 1px solid #444; border-radius: 8px;
+  padding: 16px 20px; text-align: center; min-width: 260px;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+}
+.setup-section h3 { font-size: 14px; color: #aaa; font-weight: 400; }
+.setup-section .status { font-size: 12px; }
+.status-off { color: #885; }
+.status-on { color: #6a4; }
+
+/* Thumbnail previews on landing */
+.thumb-wrap {
+  width: 220px; height: 130px;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 6px;
+  overflow: hidden;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+.thumb-wrap:hover { border-color: #6a4; }
+.thumb-wrap img {
+  max-width: 100%; max-height: 100%;
+  object-fit: contain;
+}
+.thumb-wrap .thumb-empty { color: #444; font-size: 12px; font-style: italic; }
+.thumb-wrap .thumb-label {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  background: rgba(0,0,0,0.7);
+  color: #aaa; font-size: 10px;
+  padding: 2px 6px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pulse { animation: pulse 2s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
+
+.instructions { color: #777; font-size: 13px; text-align: center; line-height: 1.6; max-width: 550px; }
+
+/* Status bar — flows at the bottom of <body> below #app, not as a fixed
+   overlay. (Old behavior covered sidebar controls.) */
+#status-bar {
+  background: #181818; color: #888;
+  font-size: 11px; padding: 4px 12px;
+  display: flex; justify-content: space-between;
+  border-top: 1px solid #333;
+  flex-shrink: 0;
+}
+
+.btn-home {
+  background: #335 !important;
+  border-color: #558 !important;
+}
+.btn-home:hover { background: #446 !important; }
+
+/* --- Fog Presets Strip --- */
+#fog-presets-bar {
+  position: fixed;
+  bottom: 28px; left: 10px; right: 10px;
+  z-index: 1000;
+  background: rgba(30,30,30,0.95);
+  border: 1px solid #555;
+  border-radius: 8px;
+  padding: 8px 12px;
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+}
+#fog-presets-bar .preset-label {
+  color: #888; font-size: 11px; white-space: nowrap; writing-mode: vertical-lr;
+  text-orientation: mixed; letter-spacing: 1px; text-transform: uppercase;
+}
+#fog-presets-list {
+  display: flex; gap: 6px; flex: 1; overflow-x: auto; padding: 2px 0;
+}
+.fog-preset-thumb {
+  position: relative;
+  width: 80px; height: 50px; min-width: 80px;
+  border: 2px solid #444;
+  border-radius: 4px;
+  cursor: pointer;
+  overflow: hidden;
+  background: #111;
+  transition: border-color 0.15s;
+}
+.fog-preset-thumb:hover { border-color: #888; }
+.fog-preset-thumb.active { border-color: #6a4; box-shadow: 0 0 6px rgba(102,170,68,0.4); }
+.fog-preset-thumb canvas {
+  width: 100%; height: 100%;
+  display: block;
+}
+.fog-preset-thumb .preset-name {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  background: rgba(0,0,0,0.75); color: #ccc; font-size: 9px;
+  padding: 1px 4px; text-align: center; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.fog-preset-thumb .preset-delete {
+  position: absolute; top: 1px; right: 2px;
+  background: none; border: none; color: #866; font-size: 12px;
+  cursor: pointer; padding: 0 2px; line-height: 1; display: none;
+}
+.fog-preset-thumb:hover .preset-delete { display: block; }
+.fog-preset-thumb .preset-delete:hover { color: #f66; }
+
+/* Pencil icon to advertise rename — appears on hover. */
+.fog-preset-thumb .preset-rename-btn {
+  position: absolute; top: 1px; left: 2px;
+  background: none; border: none; color: #aaa; font-size: 11px;
+  cursor: pointer; padding: 0 3px; line-height: 1; display: none;
+  z-index: 4;
+}
+.fog-preset-thumb:hover .preset-rename-btn { display: block; }
+.fog-preset-thumb .preset-rename-btn:hover { color: #fc5; }
+#fog-preset-actions {
+  display: flex; flex-direction: column; gap: 3px;
+}
+#fog-preset-actions button {
+  background: #333; border: 1px solid #555; color: #ccc;
+  padding: 2px 8px; border-radius: 3px; cursor: pointer;
+  font-size: 10px; white-space: nowrap;
+}
+#fog-preset-actions button:hover { background: #444; border-color: #888; }
+
+/* --- Map Library on Landing --- */
+#map-library {
+  width: 100%; max-width: 700px;
+}
+#map-library h3 {
+  font-size: 13px; color: #666; font-weight: 400;
+  margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px;
+}
+#map-library-list {
+  display: flex; gap: 8px; flex-wrap: wrap; justify-content: center;
+}
+.map-lib-card {
+  position: relative;
+  width: 130px; height: 90px;
+  border: 1px solid #333;
+  border-radius: 6px;
+  overflow: hidden;
+  cursor: pointer;
+  background: #1a1a1a;
+  transition: border-color 0.2s, transform 0.15s;
+}
+.map-lib-card:hover { border-color: #6a4; transform: translateY(-2px); }
+.map-lib-card.active { border-color: #6a4; }
+.map-lib-card.drag-over { border-color: #fc5; border-style: dashed; }
+.map-lib-card img {
+  width: 100%; height: 100%; object-fit: cover;
+}
+.map-lib-card .lib-label {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  background: rgba(0,0,0,0.8); color: #aaa; font-size: 10px;
+  padding: 2px 6px; text-align: center;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.map-lib-card .lib-delete {
+  position: absolute; top: 2px; right: 4px;
+  background: rgba(0,0,0,0.6); border: none; color: #866; font-size: 14px;
+  cursor: pointer; padding: 0 3px; border-radius: 3px; line-height: 1;
+  display: none;
+}
+.map-lib-card:hover .lib-delete { display: block; }
+.map-lib-card .lib-delete:hover { color: #f66; background: rgba(0,0,0,0.8); }
+.map-lib-card .lib-target {
+  position: absolute; top: 2px; left: 2px;
+  font-size: 9px; font-weight: 600; letter-spacing: 0.5px;
+  padding: 1px 4px; border-radius: 2px;
+  background: rgba(0,0,0,0.65);
+  pointer-events: none;
+  user-select: none;
+}
+/* Default: dimmed badge — entry exists but not currently live on its display */
+.map-lib-card .lib-target.target-projector { color: #555; border: 1px solid #444; background: rgba(0,0,0,0.55); }
+.map-lib-card .lib-target.target-sidecar  { color: #555; border: 1px solid #444; background: rgba(0,0,0,0.55); }
+/* Live: saturated badge — this entry is currently shown on its target display */
+.map-lib-card .lib-target.target-projector.live {
+  color: #cfc; border: 1px solid #6a4; background: rgba(40,80,40,0.85);
+  box-shadow: 0 0 4px rgba(102,170,68,0.5);
+}
+.map-lib-card .lib-target.target-sidecar.live {
+  color: #fda; border: 1px solid #c93; background: rgba(80,60,30,0.85);
+  box-shadow: 0 0 4px rgba(204,153,51,0.5);
+}
+
+/* === Sidebar refactor: neutralize the old fixed/floating panels === */
+/* All these used to be position:fixed overlays on top of full-screen pages.
+   In the sidebar layout they're inline children of <details> sections, so
+   we drop the absolute positioning, max-width, backgrounds, etc. */
+#gm-toolbar,
+#projection-panel,
+#text-overlay-panel,
+#crop-panel,
+#image-info {
+  position: static !important;
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  width: auto !important;
+  max-width: none !important;
+  max-height: none !important;
+  display: block !important;
+  backdrop-filter: none !important;
+  z-index: auto !important;
+  bottom: auto !important; top: auto !important; left: auto !important; right: auto !important;
+}
+#gm-toolbar {
+  display: flex !important;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+#gm-toolbar .sep {
+  width: 100%; height: 0; border: none; background: none; margin: 4px 0;
+}
+#image-info { display: flex !important; flex-direction: column; gap: 8px; }
+
+/* The fog presets bar lives at the bottom of the main content area, not
+   pinned to the viewport. */
+#fog-presets-bar {
+  position: static !important;
+  background: rgba(20,20,20,0.95) !important;
+  border-top: 1px solid #333 !important;
+  border-radius: 0 !important;
+  padding: 6px 10px !important;
+  margin: 0 !important;
+  flex-shrink: 0;
+}
+
+/* Fog/image canvas containers fill the main view */
+#gm-canvas-container {
+  width: 100%; height: 100%;
+  overflow: auto;
+}
+
+/* GM image mirror — fits the GM viewport, mirrors sidecar's cropped+rotated output */
+#image-rotation-wrap-gm {
+  position: relative;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  transform-origin: center center;
+}
+#image-canvas-wrap-gm {
+  display: inline-block;
+  max-width: 100%;
+  max-height: 100%;
+}
+#image-canvas-gm {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  background: #000;
+}
+#display-image {
+  max-width: 95%;
+  max-height: 90%;
+  object-fit: contain;
+  transform-origin: center center;
+}
+
+/* Hide the legacy three-page wrappers — their children moved into the sidebar
+   and main-content. */
+#landing, #fog-gm, #image-display { display: contents; }
+
+/* === Tokens === */
+.token {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.85);
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.6), 0 2px 6px rgba(0,0,0,0.6);
+  color: #fff;
+  font: 700 11px/1.1 system-ui, sans-serif;
+  text-align: center;
+  background-size: cover;
+  background-position: center;
+  background-clip: padding-box;
+  user-select: none;
+  box-sizing: border-box;
+  z-index: 2;
+}
+/* Name labels under map discs stay off — names live on the roster / projector.
+   Identity on the map is portrait + border color + (for duplicates) a number. */
+.token .tok-label { display: none; }
+/* Little number badge in the corner, only for duplicated tokens. */
+.tok-num {
+  position: absolute;
+  top: -3px; right: -3px;
+  min-width: 15px; height: 15px;
+  padding: 0 3px;
+  box-sizing: border-box;
+  border-radius: 8px;
+  background: rgba(14,14,18,0.95);
+  color: #fff;
+  border: 1.5px solid rgba(255,255,255,0.85);
+  font: 800 10px/1 system-ui, sans-serif;
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: none;
+  z-index: 5;
+}
+.token.pc  { border-color: #5fd0ff; }
+.token.npc { border-color: #ff7a6b; }
+/* The Company — the party as one piece. Double-ringed and gold so it reads as
+   "the party is here" at realm scale rather than as one more coloured disc. */
+.token.party {
+  border-color: #ffcf5c;
+  border-width: 3px;
+  box-shadow: 0 0 0 3px rgba(255,207,92,0.35), 0 2px 8px rgba(0,0,0,0.7);
+  z-index: 4;
+}
+.token.party .tok-label {
+  display: block;
+  position: absolute;
+  top: 100%; left: 50%;
+  transform: translate(-50%, 2px);
+  white-space: nowrap;
+  font: 700 10px/1.2 system-ui, sans-serif;
+  color: #ffe6a8;
+  text-shadow: 0 0 3px #000, 0 0 3px #000;
+  pointer-events: none;
+}
+.token.draggable { cursor: grab; }
+.token.draggable:active { cursor: grabbing; }
+.token.ghost {
+  filter: grayscale(1);
+  opacity: 0.5;
+  border-style: dashed;
+  z-index: 3;
+}
+/* Approve/reject controls floating by a proposed move (GM view) */
+.token-approve {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  gap: 6px;
+  z-index: 5;
+}
+.token-approve button {
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  border: none;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  color: #fff;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+}
+.token-approve .accept { background: #2ecc71; }
+.token-approve .reject { background: #e74c3c; }
+/* Layer itself is click-through; only the tokens/controls capture events, so
+   fog painting and marker drawing on the canvases beneath still work. */
+#gm-token-layer { z-index: 4; pointer-events: none; }
+.token, .token-approve { pointer-events: auto; }
+/* While the marker tool is armed, tokens stop capturing so strokes draw over them. */
+#gm-token-layer.markerblock .token,
+#gm-token-layer.markerblock .token-approve { pointer-events: none; }
+#remote-token-layer { pointer-events: none; }
+#viewport-outline { z-index: 6; pointer-events: none; }
+
+/* === Remote player page === */
+#remote-view {
+  position: fixed; inset: 0;
+  background: #0a0a0c;
+  color: #eee;
+  font-family: system-ui, sans-serif;
+  z-index: 9999;
+  overflow: hidden;
+}
+#remote-select {
+  position: absolute; inset: 0;
+  display: flex; align-items: flex-start; justify-content: center;
+  overflow-y: auto; padding: 24px 12px;
+}
+.remote-select-box {
+  background: #16161a;
+  border: 1px solid #333;
+  border-radius: 12px;
+  padding: 22px 20px;
+  width: min(440px, 94vw);
+}
+.remote-select-box h2 { margin: 0 0 14px; text-align: center; }
+.remote-select-box input {
+  width: 100%; box-sizing: border-box;
+  background: #222; color: #fff; border: 1px solid #444;
+  border-radius: 6px; padding: 11px; font-size: 15px; margin-bottom: 14px;
+}
+.remote-pick-label {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 1.2px;
+  color: #666; margin: 4px 0 8px;
+}
+.remote-color-row {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 16px; font-size: 13px; color: #9a9aa2;
+}
+#remote-color-swatches { display: flex; gap: 8px; flex-wrap: wrap; }
+.color-swatch {
+  width: 26px; height: 26px; border-radius: 50%; cursor: pointer;
+  border: 3px solid transparent; box-shadow: 0 0 0 1px #000;
+}
+.color-swatch.selected { border-color: #fff; }
+#remote-roster { display: flex; flex-direction: column; gap: 8px; }
+.remote-empty { color: #666; font-size: 13px; text-align: center; padding: 12px; }
+.remote-card {
+  display: flex; align-items: center; gap: 14px;
+  background: #1d1d22; border: 1px solid #333; border-radius: 10px;
+  padding: 10px 12px; cursor: pointer; transition: background .12s, border-color .12s;
+}
+.remote-card:hover { background: #24242b; border-color: #555; }
+.remote-card .rc-portrait {
+  width: 56px; height: 56px; flex: none; border-radius: 50%;
+  background-size: cover; background-position: center;
+  border: 3px solid #5fd0ff; box-shadow: 0 0 0 1px #000;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 18px; color: #fff;
+}
+.remote-card.npc .rc-portrait { border-color: #ff7a6b; }
+.remote-card .rc-name { font-size: 17px; font-weight: 600; flex: 1; }
+.remote-card .rc-status { font-size: 12px; color: #8a8a92; }
+.remote-card.taken { opacity: 0.5; cursor: not-allowed; }
+.remote-card.taken:hover { background: #1d1d22; border-color: #333; }
+#remote-color-dot {
+  width: 16px; height: 16px; border-radius: 50%; flex: none;
+  box-shadow: 0 0 0 1px #000; display: inline-block;
+}
+/* The play screen starts hidden — the player is on the join screen until they
+   pick a character, and remote-page.js sets the inline display when they do.
+   (These used to be inline `style="display:none"` on the markup.) */
+#remote-stage {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 46px;
+  display: none; align-items: center; justify-content: center;
+  overflow: hidden; touch-action: none;
+}
+#remote-canvas, #remote-grid-canvas, #remote-marker-canvas, #remote-note-canvas {
+  position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+}
+/* Only takes taps while Notes mode is on, otherwise it would sit over the
+   tokens and swallow every drag. */
+#remote-note-canvas { pointer-events: none; }
+#remote-note-canvas.armed { pointer-events: auto; cursor: crosshair; }
+#remote-note-panel {
+  display: none;
+  position: absolute; left: 0; right: 0; bottom: 46px;
+  max-height: 42vh; overflow-y: auto;
+  padding: 10px 12px 12px;
+  background: #16161a; border-top: 1px solid #333;
+  font-size: 13px;
+}
+#remote-note-panel textarea {
+  width: 100%; box-sizing: border-box; resize: vertical;
+  background: #222; color: #eee; border: 1px solid #555;
+  padding: 7px; font: 14px/1.45 system-ui, sans-serif;
+}
+#remote-note-panel button {
+  padding: 7px 14px; border-radius: 6px; border: 1px solid #555;
+  background: #2a2a30; color: #eee; cursor: pointer;
+}
+#remote-token-layer {
+  position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+}
+#remote-bar {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 46px;
+  display: none; align-items: center; gap: 10px;
+  padding: 0 12px; background: #16161a; border-top: 1px solid #333;
+  font-size: 13px;
+}
+#remote-bar #remote-who { font-weight: 700; color: #5fd0ff; }
+#remote-bar #remote-token-info { flex: 1; color: #bbb; }
+#remote-bar button {
+  padding: 7px 12px; border-radius: 6px; border: 1px solid #555;
+  background: #2a2a30; color: #eee; cursor: pointer;
+}
+#remote-bar button.active { background: #c026d3; border-color: #e879f9; color: #fff; }
+#remote-bar input[type=color] {
+  width: 30px; height: 28px; border: 1px solid #555; background: #222;
+  cursor: pointer; padding: 0;
+}
+/* Marker-mode cursor hint on map surfaces */
+.marker-arming { cursor: crosshair !important; }
+
+/* Staged-mode warning, over the map. Sticky setting + collapsed controls =
+   a projector that silently stops updating; this is the one signal that
+   cannot be collapsed away. */
+#fog-staged-banner {
+  display: none;
+  position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+  z-index: 40;
+  align-items: center; gap: 12px;
+  padding: 7px 14px;
+  background: rgba(198,102,51,0.95);
+  border: 1px solid #e85; border-radius: 6px;
+  color: #fff; font: 12px/1.2 system-ui, sans-serif;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.5);
+}
+#fog-staged-banner .fsb-act {
+  padding: 3px 9px; border-radius: 4px;
+  background: rgba(0,0,0,0.35); font-weight: 700;
+}
+#fog-staged-banner:hover { background: rgba(220,120,64,0.98); }
+
+/* === Tool strip === what a click or drag on the map does === */
+#tool-bar {
+  position: absolute; top: 10px; left: 10px; z-index: 45;
+  display: flex; align-items: stretch; gap: 3px;
+  padding: 4px; border-radius: 8px;
+  background: rgba(24,24,28,0.92);
+  border: 1px solid #444;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.5);
+  backdrop-filter: blur(6px);
+  user-select: none;
+}
+#tool-bar .tool-btn {
+  display: flex; flex-direction: column; align-items: center; gap: 1px;
+  min-width: 56px; padding: 5px 8px 4px;
+  background: transparent; border: 1px solid transparent; border-radius: 5px;
+  color: #bbb; cursor: pointer; font: 500 10px/1.1 system-ui, sans-serif;
+}
+#tool-bar .tool-btn:hover { background: #33333a; color: #eee; }
+#tool-bar .tool-btn.active {
+  background: #6a4; border-color: #8c6; color: #fff;
+}
+#tool-bar .tb-icon { font-size: 15px; line-height: 1; }
+#tool-bar .tb-label { font-size: 10px; }
+#tool-bar .tb-key {
+  font-size: 8px; opacity: 0.55; letter-spacing: 0.05em;
+}
+#tool-bar .tool-hint {
+  align-self: center; padding: 0 10px 0 6px;
+  font: 11px/1.2 system-ui, sans-serif; color: #8b8b93;
+  max-width: 260px;
+}
+
+/* Token fill lives in its own layer so fading it leaves the ring, the initials
+   and the label at full strength — the token still reads, the hex shows
+   through. See S.tokenOpacity. */
+.token .tok-fill {
+  position: absolute; inset: 0;
+  border-radius: 50%;
+  background-size: cover; background-position: center;
+  pointer-events: none;
+}
+.token .tok-ini {
+  position: relative; z-index: 1;
+  text-shadow: 0 0 3px rgba(0,0,0,0.85), 0 0 3px rgba(0,0,0,0.85);
+  pointer-events: none;
+}

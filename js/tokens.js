@@ -3,6 +3,7 @@
 import { drawNoteMarkers, initCellNotes, notesOnMapChanged, notesToolChanged } from './cell-notes.js';
 import { rlEncode } from './games.js';
 import { TOKEN_SIDES, cellAtMapPx, cellLabel, clamp01, isFlatHex, isHexKey, isParty, kCellH, kCellW, kRegularStepY, kStepY, kTokenDiam, mapDims, relMapSrc, snapNorm, tokenClass, tokenDisplayName, tokenFrac, uid } from './geometry.js';
+import { forceSyncToMapDisplay } from './fog-presets.js';
 import { setStatus } from './keyboard.js';
 import { initLegendGM, legendOnMapChanged } from './legend.js';
 import { ensureMarkerLoop } from './markers.js';
@@ -212,6 +213,7 @@ export function setTokenMap(src) {
   saveMapKey(S.tokenMapSrc);
   hydrateTokensForMap(src);
   applySavedMapKey(src);
+  resolvePlayerMap(src);              // does the table see a different image?
   notesOnMapChanged();                // notes belong to the map, not the session
   legendOnMapChanged();               // and so does the legend
   renderTokenList();
@@ -237,6 +239,8 @@ export function initTokensGM() {
   renderGMTokens();
   refreshTokenImageOptions();
   applySavedMapKey(S.lastMapSrc);
+  resolvePlayerMap(S.lastMapSrc);     // a restored session may reopen a split map
+  startPendingPolling(3000);          // watch the door
   initCellNotes();
   initLegendGM();
   // One tool at a time. Every mode-ish thing above hangs off this now, so it
@@ -299,8 +303,9 @@ export function addCompanyToken() {
     const typed = ((nameEl && nameEl.value) || '').trim();
     t = {
       id: uid(), base: typed || 'The Company', num: 0,
-      // Always gold. The Company is identified by its double ring rather than
-      // by a colour a player might also be using.
+      // Gold to start with: the Company reads as the party's own piece, and its
+      // double ring already distinguishes it from a colour a player might also
+      // be using. Only a default now — ✎ on its row changes it like any other.
       color: '#d4a017',
       img: (document.getElementById('tok-image') || {}).value || '',
       side: 'party', tx: 0.5, ty: 0.5, onMap: true,
@@ -405,6 +410,9 @@ export function renderTokenList() {
     wrap.innerHTML = '<div style="color:#666;font-size:11px;">No tokens on this map yet.</div>';
   }
   S.tokens.forEach(t => {
+    // Row + (when open) its editor, as one unit, so the editor stays attached
+    // to the token it belongs to.
+    const item = document.createElement('div');
     const row = document.createElement('div');
     row.style.cssText = 'display:flex;align-items:center;gap:6px;background:#1d1d22;border:1px solid #333;border-radius:4px;padding:3px 5px;';
     const sw = document.createElement('span');
@@ -422,6 +430,13 @@ export function renderTokenList() {
     label.title = isParty(t) ? 'The party, as one piece — any player may propose its move'
       : (t.owner ? ('Controlled by ' + t.owner) : (t.side === 'pc' ? 'Player token (unclaimed)' : 'NPC'));
     row.append(sw, label);
+    // Everything about a token used to be decided in the create form and then
+    // frozen. Rename it, recolour it, give it a portrait — after the fact, and
+    // for every token including the Company.
+    const edit = mkMini('✎', 'Name, colour and portrait',
+      () => { editingTokenId = (editingTokenId === t.id) ? null : t.id; renderTokenList(); });
+    if (editingTokenId === t.id) edit.style.color = '#ffcf5c';
+    row.append(edit);
     // Show/hide on this map — applies to PCs too (split party!). Sticks per map.
     const vis = mkMini(t.onMap ? '◉' : '○',
       t.onMap ? 'Visible on this map — click to hide' : 'Hidden — click to show on this map',
@@ -437,7 +452,9 @@ export function renderTokenList() {
     if (isParty(t)) dup.remove();   // there is only one Company
     row.append(mkMini('🗑', 'Delete from roster (all maps)', () => deleteToken(t.id)));
     if (t.owner) { const rel = mkMini('⏏', 'Release claim', () => { t.owner = ''; t.ownerColor = ''; onTokensChanged(); }); row.append(rel); }
-    wrap.appendChild(row);
+    item.appendChild(row);
+    if (editingTokenId === t.id) item.appendChild(buildTokenEditor(t, sw, label));
+    wrap.appendChild(item);
   });
   renderRosterAddOptions();
 }
@@ -457,6 +474,191 @@ function renderRosterAddOptions() {
     sel.appendChild(o);
   });
 }
+// ---- the door: people asking to join --------------------------------------
+// Players introduce themselves now instead of waiting for the GM to type their
+// names in. Nothing they send exists until it is let in — the server keeps a
+// pending portrait in memory with no URL, so this panel is the only place it
+// can be seen, and it is the GM's own machine asking.
+let pendingJoins = [];
+let pendingTimer = null;
+
+export function startPendingPolling(ms) {
+  clearInterval(pendingTimer);
+  const tick = async () => {
+    if (document.hidden) return;
+    try {
+      const r = await fetch('/api/pending', { cache: 'no-store' });
+      if (!r.ok) return;
+      const d = await r.json();
+      const next = d.pending || [];
+      if (JSON.stringify(next.map(p => p.id)) !== JSON.stringify(pendingJoins.map(p => p.id))) {
+        pendingJoins = next;
+        renderPendingJoins();
+      }
+    } catch (e) { /* server down — the panel just stops updating */ }
+  };
+  pendingTimer = setInterval(tick, ms || 3000);
+  tick();
+}
+
+async function resolveJoin(id, approve) {
+  const row = document.querySelector('[data-join="' + id + '"]');
+  if (row) row.style.opacity = '0.5';
+  try {
+    const r = await fetch('/api/pending/resolve', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, approve }),
+    });
+    const d = await r.json();
+    pendingJoins = pendingJoins.filter(p => p.id !== id);
+    renderPendingJoins();
+    if (!r.ok || !d.approved) return;
+    const p = d.player;
+    // Only now does it become a token: a real PC, already theirs, on this map.
+    const c = snapNorm(0.5, 0.5);
+    const t = {
+      id: uid(), base: p.character, num: 0, color: p.color, img: p.img || '',
+      side: 'pc', tx: c.tx, ty: c.ty, onMap: true,
+      owner: p.name, ownerColor: p.color, pending: null,
+    };
+    S.roster.push(t);
+    S.tokens.push(t);
+    onTokensChanged();
+    setStatus(p.name + ' is in, playing ' + p.character);
+  } catch (e) {
+    if (row) row.style.opacity = '';
+    setStatus('Could not answer that request — is the server running?');
+  }
+}
+
+function renderPendingJoins() {
+  const wrap = document.getElementById('join-queue');
+  const section = document.getElementById('join-queue-wrap');
+  if (!wrap) return;
+  if (section) section.style.display = pendingJoins.length ? 'block' : 'none';
+  wrap.innerHTML = '';
+  pendingJoins.forEach(p => {
+    const row = document.createElement('div');
+    row.dataset.join = p.id;
+    row.style.cssText = 'display:flex;align-items:center;gap:6px;background:#1d1d22;'
+      + 'border:1px solid #8a6a1e;border-radius:4px;padding:4px 5px;';
+    const por = document.createElement('span');
+    por.style.cssText = 'width:30px;height:30px;flex:none;border-radius:50%;border:2px solid '
+      + (/^#[0-9a-fA-F]{6}$/.test(p.color) ? p.color : '#888')
+      + ';background-size:cover;background-position:center;background-color:#333;';
+    // The portrait is the thing being approved, so show it — big enough to see
+    // what it is, and only ever here.
+    if (p.img) por.style.backgroundImage = 'url("' + p.img + '")';
+    const label = document.createElement('span');
+    label.style.cssText = 'flex:1;font-size:12px;overflow:hidden;';
+    label.innerHTML = '<b style="color:#ffe6a8;">' + esc(p.character) + '</b>'
+      + '<span style="color:#aaa;"> — ' + esc(p.name) + '</span>'
+      + (p.img ? '' : '<span style="color:#666;font-size:10px;"> · no portrait</span>');
+    const ok = document.createElement('button');
+    ok.textContent = '✓'; ok.title = 'Let ' + p.name + ' in';
+    ok.style.cssText = 'flex:none;padding:2px 7px;background:#2c4a2c;border:1px solid #4a7a4a;'
+      + 'border-radius:3px;color:#cfc;cursor:pointer;';
+    ok.onclick = () => resolveJoin(p.id, true);
+    const no = document.createElement('button');
+    no.textContent = '✗'; no.title = 'Turn this away — the portrait is discarded';
+    no.style.cssText = 'flex:none;padding:2px 7px;background:#4a2c2c;border:1px solid #7a4a4a;'
+      + 'border-radius:3px;color:#fcc;cursor:pointer;';
+    no.onclick = () => resolveJoin(p.id, false);
+    row.append(por, label, ok, no);
+    wrap.appendChild(row);
+  });
+}
+
+const esc = (s) => String(s == null ? '' : s).replace(/[<>&"]/g,
+  c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
+
+// ---- editing a token that already exists ----
+// Which row has its editor open. One at a time: the panel is tall, and the
+// list is the thing you are scanning to find the token you meant.
+let editingTokenId = null;
+
+const HEX6 = /^#[0-9a-f]{6}$/i;
+const asHex = (c) => (HEX6.test(c || '') ? c : '#888888');
+
+function buildTokenEditor(t, sw, label) {
+  const box = document.createElement('div');
+  box.style.cssText = 'display:flex;flex-direction:column;gap:4px;margin:-2px 0 2px;padding:6px 6px 8px;'
+    + 'background:#17171b;border:1px solid #333;border-top:none;border-radius:0 0 4px 4px;';
+
+  const inputCss = 'flex:1;min-width:0;background:#222;color:#eee;border:1px solid #444;'
+    + 'border-radius:3px;padding:4px;font-size:12px;';
+  const swatchCss = 'width:30px;height:26px;flex:none;border:1px solid #555;background:#222;cursor:pointer;padding:0;';
+
+  // Redraw everything that shows a token WITHOUT rebuilding the list, which
+  // would tear the editor out from under the cursor mid-edit.
+  const commit = () => {
+    sw.style.background = t.img ? '#444' : t.color;
+    sw.style.backgroundImage = t.img ? 'url("' + t.img + '")' : '';
+    const where = S.tokenGridEnabled ? cellHere(t) : '';
+    label.textContent = tokenDisplayName(t) + (where ? '  ·  ' + where : '') + (t.owner ? '  ·  ' + t.owner : '');
+    renderGMTokens(); broadcastTokens(); pushTokensToServer(); saveTokens();
+  };
+
+  const nameRow = document.createElement('div');
+  nameRow.style.cssText = 'display:flex;gap:4px;align-items:center;';
+  const name = document.createElement('input');
+  name.type = 'text'; name.value = t.base; name.placeholder = 'Name'; name.style.cssText = inputCss;
+  name.addEventListener('input', () => {
+    // A blank name would render as an unlabelled disc you can no longer find
+    // in the list to fix. Keep the last good one until they type a new one.
+    const v = name.value.trim();
+    if (v) { t.base = v; commit(); }
+  });
+  const color = document.createElement('input');
+  color.type = 'color'; color.value = asHex(t.color); color.title = 'Token colour';
+  color.style.cssText = swatchCss;
+  color.addEventListener('input', () => { t.color = color.value; commit(); });
+  nameRow.append(name, color);
+
+  const imgRow = document.createElement('div');
+  imgRow.style.cssText = 'display:flex;gap:4px;align-items:center;';
+  const img = document.createElement('select');
+  img.style.cssText = inputCss;
+  fillImageSelect(img, [], 'No image (coloured disc)', t.img || '');
+  vaultImages().then(list => fillImageSelect(img, list, 'No image (coloured disc)', t.img || ''));
+  img.addEventListener('change', () => { t.img = img.value || ''; commit(); });
+  const reload = mkMini('↻', 'Reload images from your vault', () => {
+    vaultImages(true).then(list => fillImageSelect(img, list, 'No image (coloured disc)', t.img || ''));
+  });
+  imgRow.append(img, reload);
+
+  box.append(nameRow, imgRow);
+
+  // The Company is the party as one piece — it has no other side to be, and
+  // it is identified by its double ring rather than by its colour, so the
+  // colour is now just a preference like any other token's.
+  if (!isParty(t)) {
+    const sideRow = document.createElement('div');
+    sideRow.style.cssText = 'display:flex;gap:4px;align-items:center;';
+    const lbl = document.createElement('span');
+    lbl.textContent = 'Side'; lbl.style.cssText = 'font-size:11px;color:#aaa;';
+    const side = document.createElement('select');
+    side.style.cssText = inputCss;
+    side.innerHTML = '<option value="pc">Player (PC)</option><option value="npc">NPC / Enemy</option>';
+    side.value = t.side === 'pc' ? 'pc' : 'npc';
+    side.addEventListener('change', () => {
+      t.side = side.value;
+      // A token that stops being a PC cannot still be held by a player.
+      if (t.side !== 'pc') { t.owner = ''; t.ownerColor = ''; }
+      renderTokenList();          // the row's own buttons depend on side
+      commit();
+    });
+    sideRow.append(lbl, side);
+    box.append(sideRow);
+  } else {
+    const note = document.createElement('div');
+    note.style.cssText = 'font-size:10px;color:#777;';
+    note.textContent = 'The party as one piece. Any player may propose its move.';
+    box.append(note);
+  }
+  return box;
+}
+
 function mkMini(txt, title, fn) {
   const b = document.createElement('button');
   b.textContent = txt; b.title = title;
@@ -464,19 +666,137 @@ function mkMini(txt, title, fn) {
   b.onclick = fn; return b;
 }
 
-export function refreshTokenImageOptions() {
-  fetch('/api/maps').then(r => r.json()).then(list => {
+// The vault's images, for any picker that needs them. Cached for the session:
+// three pickers ask for this list and walking the vault is not free.
+let _mapListPromise = null;
+export function vaultImages(force) {
+  if (force || !_mapListPromise) {
+    _mapListPromise = fetch('/api/maps').then(r => r.json()).catch(() => []);
+  }
+  return _mapListPromise;
+}
+
+function fillImageSelect(sel, list, blankLabel, value) {
+  if (!sel) return;
+  sel.innerHTML = '';
+  const blank = document.createElement('option');
+  blank.value = ''; blank.textContent = blankLabel;
+  sel.appendChild(blank);
+  list.forEach(m => {
+    const o = document.createElement('option');
+    o.value = m.path; o.textContent = m.name;
+    sel.appendChild(o);
+  });
+  // A saved value that is no longer in the vault would silently fall back to
+  // the blank option, which reads as "no image" rather than "missing file".
+  if (value && !list.some(m => m.path === value)) {
+    const o = document.createElement('option');
+    o.value = value; o.textContent = decodeURIComponent(value.split('/').pop()) + ' (missing)';
+    sel.appendChild(o);
+  }
+  sel.value = value || '';
+}
+
+export function refreshTokenImageOptions(force) {
+  vaultImages(force).then(list => {
     const sel = document.getElementById('tok-image');
-    if (!sel) return;
-    const cur = sel.value;
-    sel.innerHTML = '<option value="">No image (colored disc)</option>';
-    list.forEach(m => {
-      const o = document.createElement('option');
-      o.value = m.path; o.textContent = m.name;
-      sel.appendChild(o);
+    if (sel) fillImageSelect(sel, list, 'No image (colored disc)', sel.value);
+    refreshPlayerMapOptions(list);
+  });
+}
+
+// --- Split maps: the GM's copy, and the players' ---------------------------
+// A realm sheet with the Myths and Holdings drawn on it is the GM's copy; the
+// table gets a clean one. They are not two maps — same hexes, same notes, same
+// tokens, same fog — so the pairing is declared once beside the calibration
+// (Map Notes/<map>.key.json) and resolved here on every map change.
+//
+// S.lastMapSrc stays the GM's image and remains the map's IDENTITY: it is what
+// every sidecar file is named after. S.playerMapSrc is only ever "what to draw
+// on a player-facing surface".
+export function playerFacingMapSrc() {
+  const own = S.fogImage ? S.fogImage.src : '';
+  if (S.fogContext === 'show') return own;      // sidecar handouts are never split
+  return S.playerMapSrc || own;
+}
+
+export function isSplitMap() { return !!S.playerMapSrc; }
+
+export async function resolvePlayerMap(src) {
+  const forMap = relMapSrc(src || '');
+  const had = S.playerMapSrc;
+  S.playerMapSrc = '';
+  if (!forMap) { updateSplitUI(); return; }
+  try {
+    const r = await fetch('/api/mapkey?map=' + encodeURIComponent(forMap));
+    const d = await r.json();
+    // The GM may have moved on while this was in flight.
+    if (relMapSrc(S.lastMapSrc || '') !== forMap) return;
+    S.playerMapSrc = d.player || '';
+  } catch (e) { S.playerMapSrc = ''; }
+  updateSplitUI();
+  // The projector was handed an image before we knew there was a second one.
+  if (S.playerMapSrc !== had && S.fogContext === 'map') forceSyncToMapDisplay();
+}
+
+export function refreshPlayerMapOptions(list) {
+  const sel = document.getElementById('split-player-map');
+  if (!sel) return;
+  Promise.resolve(list || vaultImages()).then(l => {
+    fillImageSelect(sel, l || [], 'Not split — the table sees my map', S.playerMapSrc);
+  });
+}
+
+export async function setPlayerMapFromSelect() {
+  const sel = document.getElementById('split-player-map');
+  if (!sel || !S.lastMapSrc) return;
+  const chosen = sel.value || '';
+  if (chosen && relMapSrc(chosen) === relMapSrc(S.lastMapSrc)) {
+    setSplitStatus('That is this map. Pick the players’ copy, or leave it unsplit.', true);
+    sel.value = S.playerMapSrc || '';
+    return;
+  }
+  setSplitStatus('saving…');
+  try {
+    const r = await fetch('/api/mapkey', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ map: relMapSrc(S.lastMapSrc), player: chosen }),
     });
-    sel.value = cur;
-  }).catch(() => {});
+    const d = await r.json();
+    if (!r.ok) {
+      setSplitStatus(d.detail || d.error || 'could not save', true);
+      sel.value = S.playerMapSrc || '';
+      return;
+    }
+    S.playerMapSrc = d.player || '';
+    updateSplitUI();
+    setSplitStatus(S.playerMapSrc ? 'saved to your vault' : 'this map is no longer split');
+    if (S.fogContext === 'map') forceSyncToMapDisplay();
+  } catch (e) {
+    setSplitStatus('not saved — is the server running?', true);
+  }
+}
+
+function setSplitStatus(t, bad) {
+  const el = document.getElementById('split-status');
+  if (!el) return;
+  el.textContent = t;
+  el.style.color = bad ? '#e8a0a0' : '#888';
+}
+
+// The GM is looking at art the table cannot see. That should be visible at a
+// glance, not something you remember — it is the whole point of the feature,
+// and the failure mode is describing a Myth nobody can see.
+export function updateSplitUI() {
+  const badge = document.getElementById('split-badge');
+  if (badge) {
+    badge.style.display = S.playerMapSrc ? 'inline-block' : 'none';
+    badge.title = S.playerMapSrc
+      ? 'Split map — the table is seeing ' + decodeURIComponent(S.playerMapSrc.split('/').pop())
+      : '';
+  }
+  const sel = document.getElementById('split-player-map');
+  if (sel && sel.value !== (S.playerMapSrc || '')) refreshPlayerMapOptions();
 }
 
 // Toggles whether the grid is DRAWN. Snapping, cell addresses and notes keep
