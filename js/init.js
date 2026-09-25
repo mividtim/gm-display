@@ -8,13 +8,15 @@ import { startFogMode, startImageMode } from './fog.js';
 import { renderCampaignSelector, renderGameSelector, restoreState, saveState, sendShowContent } from './games.js';
 import { setStatus } from './keyboard.js';
 import { setupPlayerChannel } from './navigation.js';
-import { addToImageLibrary, applySavedBgForSrc, initArtUploadInput, loadImageLibrary, loadMapLibrary, refreshArtVaultOptions, renderImageLibrary, renderMapLibrary, setFogContext } from './per-map-store.js';
+import { addToImageLibrary, uploadArtFiles, applySavedBgForSrc, initArtUploadInput, loadImageLibrary, loadMapLibrary, refreshArtVaultOptions, renderImageLibrary, renderMapLibrary, setFogContext } from './per-map-store.js';
 import { initCornerDrag, initPanDrag, sendProjectionSettings, sendShowSettings } from './projection.js';
+import { attachProjectorTokenDrag } from './projector.js';
 import { setupRemoteView } from './remote-page.js';
 import { initImageNameRename, initSidebarResize } from './sidebar.js';
 import { ensurePathfinderSocietyModules, loadCampaignsIndex, loadGamesIndex, migrateLegacyKeysToDefault } from './state.js';
 import { S } from './store.js';
-import { initTokensGM, setTokenMap } from './tokens.js';
+import { initBoardGM } from './board-gm.js';
+import { applyPlayerAction, initTokensGM, onTokensChanged, setTokenMap } from './tokens.js';
 // `role` is passed by the entry module (gm.js / display.js / remote.js). The
 // URL fallback keeps the old single-page ?mode= URLs working for anything still
 // pointing at them.
@@ -41,6 +43,10 @@ export function init(role, display) {
     if (sb) sb.style.display = 'none';
     document.title = S.playerDisplay === 'map' ? 'Projector (Maps)' : 'Sidecar (Images)';
     setupPlayerChannel();
+    // The map on the table is a thing you point at. Let it be a thing you can
+    // move a token on, too, instead of walking back to the laptop for every
+    // step. Sidecar handouts have no tokens, so this is the map window only.
+    if (S.playerDisplay === 'map') attachProjectorTokenDrag();
     return;
   }
 
@@ -60,11 +66,18 @@ export function init(role, display) {
   dropZone.addEventListener('click', () => fileInput.click());
   dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
   dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+  // Any number of images: each is saved into the vault and added to the
+  // library (as handouts, unless "Add artwork" is set to Map).
   dropZone.addEventListener('drop', (e) => {
     e.preventDefault(); dropZone.classList.remove('dragover');
-    if (e.dataTransfer.files.length) loadFile(e.dataTransfer.files[0]);
+    if (e.dataTransfer.files.length) uploadArtFiles(e.dataTransfer.files);
   });
-  fileInput.addEventListener('change', (e) => { if (e.target.files.length) loadFile(e.target.files[0]); });
+  fileInput.multiple = true;
+  fileInput.addEventListener('change', (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (files.length) uploadArtFiles(files);
+  });
 
   const brushEl = document.getElementById('brush-size');
   if (brushEl) brushEl.addEventListener('input', (e) => { S.brushSize = parseInt(e.target.value); updateBrushPreview(); saveState(); });
@@ -139,6 +152,21 @@ export function init(role, display) {
       syncToMapDisplay();
       sendProjectionSettings();
     }
+    // The GM dragged a token on the projector window. That window is a mirror
+    // and holds no roster, so it asks; this page is where tokens actually
+    // live, so it commits — down the same path a drag on this page takes, and
+    // straight back out to the projector and to every remote player.
+    //
+    // local:true is safe to assert here: a BroadcastChannel is same-origin and
+    // reaches only pages this browser opened. Nothing off this machine can
+    // post to it.
+    if (e.data.type === 'token-move') {
+      const moved = applyPlayerAction({
+        kind: 'gmmove', local: true,
+        tokenId: e.data.id, tx: e.data.tx, ty: e.data.ty,
+      });
+      if (moved) onTokensChanged();
+    }
   };
   S.showChannel.onmessage = (e) => {
     if (e.data.type === 'heartbeat') {
@@ -179,6 +207,7 @@ export function init(role, display) {
 
   // Tokens / markers / remote-player sync (GM side).
   initTokensGM();
+  initBoardGM();
 }
 
 // === Display Status ===

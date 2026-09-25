@@ -6,7 +6,8 @@
 // given a data-act hook. Keeping this in one generated table means a control
 // cannot quietly lose its handler — bind() reports anything that matches no
 // element, and the regression harness asserts that list is empty.
-import { toggleNotesMode } from './cell-notes.js';
+import { openBoardView } from './board-gm.js';
+import { toggleNotesMode, togglePartyLog } from './cell-notes.js';
 import { cropFill, cropFit, hideTextOnPlayer, setZoomPercent, showTextOnPlayer, updateCrop, zoomBy } from './crop.js';
 import { copyPreset, newPreset, setTool, syncNow, toggleLiveSync } from './fog-presets.js';
 import { startImageMode, switchToMapFog } from './fog.js';
@@ -15,9 +16,9 @@ import { openDisplay } from './init.js';
 import { startLegendFromButton, toggleLegendOnProjector } from './legend.js';
 import { addArtFromVault, refreshArtVaultOptions } from './per-map-store.js';
 import { nudgeCorner, resetCorner, resetProjection, rotateBy, setBg, setGridColor, setRotation, toggleGrid, toggleTestPattern, updateGridOpacity, updateGridSize, updateScale } from './projection.js';
-import { remoteChangeCharacter, remoteToggleLegend, remoteToggleMarker, remoteToggleNotes } from './remote-page.js';
+import { remoteChangeCharacter, remoteGmLoginClick, remoteToggleLegend, remoteToggleLog, remoteToggleMarker, remoteToggleNotes, setRemoteTool } from './remote-page.js';
 import { fogRedo, fogUndo, hideAll, revealAll, toggleSidebarCollapsed } from './sidebar.js';
-import { addCompanyToken, addRosterTokenFromSelect, createTokenFromForm, nudgeKeyCell, nudgeKeyCellY, nudgeKeyOrigin, refreshPlayerMapOptions, refreshTokenImageOptions, resetMapKey, setKeyAcross, setKeyCell, setKeyCellY, setKeyOx, setKeyOy, setKeyShape, setPlayerMapFromSelect, setTokenGridColor, setTokenOpacity, toggleKeyLink, toggleMarkerMode, toggleTokenGrid, vaultImages } from './tokens.js';
+import { addCompanyToken, addRosterTokenFromSelect, createTokenFromForm, hideAllNpcs, nudgeKeyCell, nudgeKeyCellY, nudgeKeyOrigin, refreshPlayerMapOptions, refreshTokenImageOptions, reloadEncounterFromVault, resetMapKey, revealAllNpcs, saveEncounterToVault, setKeyAcross, setKeyCell, setKeyCellY, setKeyOx, setKeyOy, setKeyShape, setPlayerMapFromSelect, setTokenGridColor, setTokenOpacity, toggleKeyLink, toggleMarkerMode, toggleTokenGrid, vaultImages } from './tokens.js';
 const unbound = [];
 let bound = 0;
 
@@ -30,6 +31,8 @@ function bind(selector, event, handler) {
 
 export function attachGmBindings() {
   bind('#btn-notes-mode', 'click', () => { toggleNotesMode(); });
+  bind('#btn-open-board', 'click', () => { openBoardView(); });
+  bind('#btn-party-log', 'click', () => { togglePartyLog(); });
   bind('#sidebar-collapse-btn', 'click', () => { toggleSidebarCollapsed(); });
   bind('#campaign-select', 'change', (_e, el) => { onCampaignSelectChange(el.value); });
   bind('[data-act="b1"]', 'click', () => { newCampaignPrompt(); });
@@ -40,6 +43,12 @@ export function attachGmBindings() {
   bind('[data-act="b5"]', 'click', () => { deleteActiveGame(); });
   bind('[data-act="b6"]', 'click', () => { openDisplay('map'); });
   bind('[data-act="b7"]', 'click', () => { openDisplay('show'); });
+  bind('[data-act="gm-code-new"]', 'click', () => {
+    if (!confirm('Make a new GM code? Any other device logged in as GM is logged out.')) return;
+    fetch('/api/gm-code/new', { method: 'POST' }).then(r => r.json()).then(d => {
+      const el = document.getElementById('gm-code'); if (el) el.textContent = d.code || '?'; });
+  });
+  bind('[data-act="player-preview"]', 'click', () => { window.open('remote.html?preview=1', 'gmd-player-preview'); });
   bind('[data-act="b8"]', 'click', () => { refreshArtVaultOptions(); });
   bind('[data-act="b9"]', 'click', () => { addArtFromVault(); });
   bind('[data-act="b10"]', 'click', () => { document.getElementById('art-file-input').click(); });
@@ -135,6 +144,10 @@ export function attachGmBindings() {
   bind('#btn-legend-show', 'click', () => { toggleLegendOnProjector(); });
   bind('#btn-legend-start', 'click', () => { startLegendFromButton(); });
   bind('[data-act="b65"]', 'click', () => { addRosterTokenFromSelect(); });
+  bind('[data-act="npc-hide-all"]', 'click', () => { hideAllNpcs(); });
+  bind('[data-act="npc-show-all"]', 'click', () => { revealAllNpcs(); });
+  bind('[data-act="enc-save"]', 'click', () => { saveEncounterToVault(); });
+  bind('[data-act="enc-reload"]', 'click', () => { reloadEncounterFromVault(); });
   bind('#btn-marker', 'click', () => { toggleMarkerMode(); });
   bind('[data-act="b66"]', 'click', () => { showTextOnPlayer(); });
   bind('[data-act="b67"]', 'click', () => { hideTextOnPlayer(); });
@@ -153,6 +166,10 @@ export function attachRemoteBindings() {
   bind('#remote-change-btn', 'click', () => { remoteChangeCharacter(); });
   bind('#remote-marker-btn', 'click', () => { remoteToggleMarker(); });
   bind('#remote-legend-btn', 'click', () => { remoteToggleLegend(); });
+  bind('#remote-log-btn', 'click', () => { remoteToggleLog(); });
+  bind('#remote-tool-map', 'click', () => { setRemoteTool('map'); });
+  bind('#remote-tool-board', 'click', () => { setRemoteTool('board'); });
+  bind('#remote-gm-login', 'click', () => { remoteGmLoginClick(); });
   return unbound;
 }
 

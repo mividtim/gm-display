@@ -18,7 +18,8 @@ export function setMainView(view) {
   // Fog-presets bar lives at the bottom of main content; only visible while
   // editing fog.
   const presets = document.getElementById('fog-presets-bar');
-  if (presets) presets.style.display = (view === 'fog') ? '' : 'none';
+  if (presets) presets.style.display = (view === 'fog' && S.fogContext !== 'show') ? '' : 'none';
+  if (S._onMainView) S._onMainView(view);     // the bulletin board (board-gm.js)
 }
 
 export function goHome() {

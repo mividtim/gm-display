@@ -20,13 +20,23 @@ import json
 import urllib.parse
 import webbrowser
 import threading
+import shlex
 import signal
 import subprocess
 import time
 
 import notes_api  # per-cell notes for any keyed map
+import board_api  # the campaign's shared bulletin board
 
 PORT = 7680
+# Loopback by default: the GM's own machine is the whole audience, and a server
+# that quietly listens on the network is not something you should have to opt
+# OUT of. --lan opts in, for the case where the thing that needs to reach this
+# is on another box (an ngrok host, say) rather than on this one.
+BIND_HOST = '127.0.0.1'
+# How to open the GM page, when the default browser's guess is not good enough.
+# Set by --browser-cmd= or $GM_DISPLAY_BROWSER; see open_gm_page().
+BROWSER_CMD = ''
 STATIC_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Directories where maps/images are stored (searched in order)
@@ -35,6 +45,116 @@ IMAGE_ROOTS = []
 # Index: maps filename/partial-path → absolute path (built at startup)
 # Enables instant fallback when gm:// links use partial paths
 FILE_INDEX = {}  # "Dragonfall Maps/Map - The Bone Field.jpg" → "/full/path/..."
+
+# ---------------------------------------------------------------------------
+# Who runs this, and which code it is running
+# ---------------------------------------------------------------------------
+# The menu-bar app (gm_menubar.swift) is the one thing meant to run the server:
+# it starts server.py straight out of the vault as its own child and marks it
+# with GMD_SUPERVISOR=tray. Everything else — a Terminal, a stale launchd job —
+# is a second claimant on the port, and the port has one owner.
+SUPERVISOR = os.environ.get('GMD_SUPERVISOR', '')
+STARTED_AT = time.time()
+
+# The server's own code. When any of it changes on disk the server restarts
+# itself in place (os.execv, same PID, same arguments), so a new version is
+# live as soon as it is saved — no hunting for which process to kill.
+PY_SOURCES = ('server.py', 'notes_api.py', 'board_api.py')
+
+# What the pages are made of. Pages poll /api/build and offer a reload when
+# this changes, so an open GM page or player tab does not keep running last
+# version's JavaScript against this version's server.
+_build_cache = {'t': 0.0, 'v': ''}
+
+
+def _web_files():
+    out = []
+    for sub, exts in (('', ('.html',)), ('js', ('.js',)), ('css', ('.css',))):
+        d = os.path.join(STATIC_DIR, sub)
+        try:
+            for f in sorted(os.listdir(d)):
+                if f.endswith(exts):
+                    out.append(os.path.join(d, f))
+        except OSError:
+            pass
+    return out
+
+
+def _stamp_of(paths):
+    import hashlib
+    h = hashlib.sha1()
+    for p in paths:
+        try:
+            st = os.stat(p)
+            h.update(f'{p}:{st.st_mtime_ns}:{st.st_size};'.encode())
+        except OSError:
+            h.update(f'{p}:missing;'.encode())
+    return h.hexdigest()[:12]
+
+
+def web_build():
+    now = time.time()
+    if now - _build_cache['t'] > 1.0:
+        _build_cache['v'] = _stamp_of(_web_files())
+        _build_cache['t'] = now
+    return _build_cache['v']
+
+
+# ---------------------------------------------------------------------------
+# The GM code: GM powers on the player page from any device
+# ---------------------------------------------------------------------------
+# On this machine the player page already knows it is the GM. From a tablet
+# over the LAN, or through the tunnel, it cannot — so the GM types a short
+# code, shown in the GM page's Displays panel, and gets a cookie. The code and
+# the key the cookie is signed with live in .gm-secret.json beside this file;
+# making a new code makes a new key, which logs every GM browser out.
+GM_COOKIE = 'gmd_gm'
+GM_SECRET_FILE = os.path.join(STATIC_DIR, '.gm-secret.json')
+_gm_secret = {}
+_login_tries = {}             # client -> [timestamps]
+_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'   # no 0/O, 1/I/L
+
+
+def _load_gm_secret(regenerate=False):
+    import secrets
+    if not regenerate and not _gm_secret:
+        try:
+            with open(GM_SECRET_FILE, encoding='utf-8') as f:
+                d = json.load(f)
+            if d.get('code') and d.get('key'):
+                _gm_secret.update(d)
+        except Exception:
+            pass
+    if regenerate or not _gm_secret:
+        code = ''.join(secrets.choice(_CODE_ALPHABET) for _ in range(8))
+        _gm_secret.clear()
+        _gm_secret.update({'code': code[:4] + '-' + code[4:], 'key': secrets.token_hex(32)})
+        try:
+            with open(GM_SECRET_FILE, 'w', encoding='utf-8') as f:
+                json.dump(_gm_secret, f)
+            os.chmod(GM_SECRET_FILE, 0o600)
+        except Exception as e:
+            print(f"⚠️  Could not save the GM code: {e}")
+    return _gm_secret
+
+
+def gm_code():
+    return _load_gm_secret()['code']
+
+
+def gm_token():
+    import hmac as _h, hashlib
+    return _h.new(_load_gm_secret()['key'].encode(), b'gm', hashlib.sha256).hexdigest()
+
+
+def hmac_eq(a, b):
+    import hmac as _h
+    return _h.compare_digest(str(a), str(b))
+
+
+def _norm_code(c):
+    return ''.join(ch for ch in str(c or '').upper() if ch.isalnum())
+
 
 # Pending command for the GM page to pick up
 pending_command = None
@@ -157,6 +277,28 @@ def save_to_uploads(basename, raw, ext):
     return '/maps/' + urllib.parse.quote(candidate)
 
 
+def lan_address():
+    """This machine's address on the local network, or ''.
+
+    Opening a UDP socket toward an off-net address makes the OS pick the
+    interface it would actually route through, which is the one another box on
+    the wifi can reach. Nothing is sent.
+    """
+    import socket
+    s_ = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s_.connect(('8.8.8.8', 9))        # never sent; just picks the interface
+        ip = s_.getsockname()[0]
+    except Exception:
+        return ''
+    finally:
+        s_.close()
+    # Loopback or a documentation range means we learned nothing useful.
+    if ip.startswith(('127.', '192.0.2.', '198.51.100.', '203.0.113.')):
+        return ''
+    return ip
+
+
 def _prune_markers():
     """Drop marker strokes older than MARKER_TTL. Caller holds state_lock."""
     now = time.time()
@@ -201,6 +343,27 @@ def _rel_of(maps_url):
     return urllib.parse.unquote(u[6:]).replace('\\', '/').strip('/')
 
 
+def visible_to_players(doc):
+    """The token doc as a remote browser is allowed to receive it.
+
+    An NPC the GM has not revealed on this map is not merely undrawn on the
+    player's screen — it is absent from the bytes the player's browser is
+    handed. Filtering only at render time would leave four invisible K'n-yani,
+    their names and their exact squares one devtools tab away, which is the
+    whole ambush.
+
+    PCs and the Company stay in the payload whatever their visibility. A
+    player's own piece is not a secret from that player, and the roster on the
+    join screen is built from this list — strip a hidden PC and the player who
+    owns it can never claim it back after a refresh.
+    """
+    doc = doc or {}
+    out = dict(doc)
+    out['tokens'] = [t for t in (doc.get('tokens') or [])
+                     if t.get('onMap') or t.get('side') != 'npc']
+    return out
+
+
 def published_assets():
     """The set of vault-relative paths currently published to the table."""
     with state_lock:
@@ -212,19 +375,100 @@ def published_assets():
         # On a split map the players' copy is published and the GM's is not,
         # so a guessed filename does not become a second way in.
         out.add(_rel_of(notes_api.player_variant(gm_src) or gm_src))
-    for t in (doc.get('tokens') or []):
+    # Same rule as the token doc itself: a hidden NPC's portrait is not
+    # published either, or the art would still be fetchable by name once the
+    # token was gone from the payload.
+    for t in (visible_to_players(doc).get('tokens') or []):
         if t.get('img'):
             out.add(_rel_of(t['img']))
+    # Handouts the GM has pinned to the campaign's bulletin board. Un-sharing
+    # one takes it off this list, and its image stops being served.
+    out |= board_api.published_assets()
     out.discard('')
     return out
 
 
 def may_serve_remote(rel_path):
+    """Which /maps/ paths a player may fetch BY NAME: legend swatches, and
+    nothing else. Everything published to the table — the map, portraits,
+    handouts — reaches players only under an opaque /a/ address, because a
+    filename is information. 'Barbas.png' pinned to the board as Agent Exeter's
+    photo gives away a reveal the story has not made yet."""
     norm = (rel_path or '').replace('\\', '/').strip('/')
     # Legend swatches are captions for a map the player is already looking at.
-    if norm.startswith(notes_api.SUBDIR + '/legend-icons/'):
-        return True
-    return norm in published_assets()
+    return norm.startswith(notes_api.SUBDIR + '/legend-icons/')
+
+
+# ---------------------------------------------------------------------------
+# Opaque addresses for what players are shown
+# ---------------------------------------------------------------------------
+# A player's browser never sees a vault path. Each published image is served
+# at /a/<token><ext>, where the token is an HMAC of its path under this
+# install's secret key — stable (so browsers can cache it) but meaningless.
+# The map's identity (which the party-notes and legend files are named after)
+# goes out as an opaque "mk-" key the same way, and is turned back into the
+# real path here when the player page asks for its notes.
+
+def _hmac_hex(label, text):
+    import hmac as _h, hashlib
+    return _h.new(_load_gm_secret()['key'].encode(), f'{label}:{text}'.encode(),
+                  hashlib.sha256).hexdigest()
+
+
+def asset_token(rel):
+    return _hmac_hex('asset', rel)[:22]
+
+
+def public_url(maps_url):
+    """'/maps/Agents/Barbas.png' -> '/a/3f9c…e1.png'. Anything that is not a
+    vault image (a data: URL, '') is returned unchanged."""
+    rel = _rel_of(maps_url)
+    if not rel:
+        return maps_url
+    ext = os.path.splitext(rel)[1].lower()
+    if ext not in ('.png', '.jpg', '.jpeg', '.gif', '.webp'):
+        ext = ''
+    return f'/a/{asset_token(rel)}{ext}'
+
+
+def map_key_token(gm_src):
+    return 'mk-' + _hmac_hex('map', _rel_of(gm_src) or gm_src)[:22]
+
+
+def resolve_map_key(key):
+    """An opaque map key from the player page -> the map's real identity.
+    Only the map currently on the table resolves; anything else is ''."""
+    key = key or ''
+    if not key.startswith('mk-'):
+        return key
+    with state_lock:
+        frame = player_state['payload'] or {}
+    gm_src = frame.get('imageSrc') or ''
+    return gm_src if gm_src and hmac_eq(map_key_token(gm_src), key) else ''
+
+
+def resolve_asset(token):
+    """/a/<token> -> the vault file, if (and only if) it is published now."""
+    token = (token or '').split('.')[0]
+    if not token:
+        return None
+    for rel in published_assets():
+        if hmac_eq(asset_token(rel), token):
+            return resolve_map_file(rel)
+    return None
+
+
+def tokens_for_players(doc):
+    """visible_to_players(), with every portrait behind an opaque address."""
+    out = visible_to_players(doc)
+    toks = []
+    for t in out.get('tokens') or []:
+        if t.get('img'):
+            t = dict(t)
+            t['img'] = public_url(t['img'])
+        toks.append(t)
+    out['tokens'] = toks
+    return out
 
 
 # --- image dimensions, without a dependency --------------------------------
@@ -314,18 +558,46 @@ class GMHandler(http.server.SimpleHTTPRequestHandler):
         super().end_headers()
 
     # --- helpers -----------------------------------------------------------
-    def is_remote(self):
-        """True if the request came from outside this machine.
+    def is_loopback(self):
+        """True only for a request from a browser on THIS machine.
 
         ngrok (and most reverse proxies) inject X-Forwarded-For with the real
         visitor IP; a direct localhost hit from the GM's own browser does not.
-        We also treat any non-loopback peer as remote. Remote clients get the
-        player page only and cannot push authoritative state.
+        Anything else is another machine. The GM page, and every endpoint that
+        pushes or drains the table's authoritative state, answers to this and
+        nothing else — not even a logged-in GM on a tablet, whose browser holds
+        none of the campaign and would overwrite the table with an empty one.
         """
         if self.headers.get('X-Forwarded-For') or self.headers.get('Forwarded'):
-            return True
+            return False
         peer = (self.client_address[0] if self.client_address else '')
-        return peer not in ('127.0.0.1', '::1', 'localhost', '')
+        return peer in ('127.0.0.1', '::1', 'localhost', '')
+
+    def gm_cookie(self):
+        """True if this browser logged in with the GM code (see /api/gm-login)."""
+        raw = self.headers.get('Cookie') or ''
+        for part in raw.split(';'):
+            k, _, v = part.strip().partition('=')
+            if k == GM_COOKIE and v and hmac_eq(v, gm_token()):
+                return True
+        return False
+
+    def is_remote(self):
+        """True if this request gets the PLAYER's view of the table.
+
+        This machine is the GM. So is a browser anywhere that logged in with
+        the GM code — it can then move any token, see hidden ones and sign
+        board notes as the GM, from the player page. Remote clients get the
+        player page only and cannot push authoritative state (is_loopback).
+        """
+        # The GM's "preview as a player" page asks to be treated exactly like
+        # a visitor on the tunnel, so what it shows is what the table gets.
+        # (Only ever a downgrade: nothing can claim to be MORE local.)
+        if self.headers.get('X-GMD-As') == 'player':
+            return True
+        if self.is_loopback():
+            return False
+        return not self.gm_cookie()
 
     def _send_json(self, obj, status=200):
         data = json.dumps(obj).encode()
@@ -353,6 +625,10 @@ class GMHandler(http.server.SimpleHTTPRequestHandler):
         if notes_api.handle_get(self, parsed):
             return
 
+        # --- The campaign bulletin board (long poll) ---
+        if board_api.handle_get(self, parsed):
+            return
+
         # realm.html was a page that existed only for the Mythic Bastionland
         # realm: its own hex geometry, its own note store, its own token code.
         # Every part of it is now general — any map with a grid calibration has
@@ -368,15 +644,26 @@ class GMHandler(http.server.SimpleHTTPRequestHandler):
         # Returns token doc version, the token doc, and currently-active markers.
         # Clients compare versions client-side and only re-render on change.
         if parsed.path == '/api/sync':
+            remote = self.is_remote()
             with state_lock:
                 _prune_markers()
+                doc = tokens_state['payload']
                 out = {
                     'tokensVersion': tokens_state['version'],
-                    'tokens': tokens_state['payload'],
+                    'tokens': doc,
                     'frameVersion': player_state['version'],
                     'markers': list(markers.values()),
                     'now': time.time(),
+                    # Whether this page may move a token without asking. Decided
+                    # here, by where the request came from — the player page uses
+                    # it to know it is the GM's own browser looking.
+                    'local': not remote,
+                    # Logged in with the GM code (rather than on this machine),
+                    # so the page can offer to log out.
+                    'gmLogin': (not remote) and not self.is_loopback(),
                 }
+            if remote:
+                out['tokens'] = tokens_for_players(doc)
             self._send_json(out)
             return
 
@@ -393,7 +680,7 @@ class GMHandler(http.server.SimpleHTTPRequestHandler):
                 # explicitly so the player page files what it writes under the
                 # same name the GM reads it back from, rather than under
                 # whichever of the two images it happened to be handed.
-                payload['mapKey'] = gm_src
+                payload['mapKey'] = map_key_token(gm_src)
                 variant = notes_api.player_variant(gm_src)
                 payload['split'] = bool(variant)
                 # This endpoint is the PLAYER's frame — remote.html is its only
@@ -407,8 +694,8 @@ class GMHandler(http.server.SimpleHTTPRequestHandler):
                 # handed the copy with the Myths on it. "Is this the player view?"
                 # is the only thing that should decide, and for this endpoint the
                 # answer is always yes.
-                if variant:
-                    payload['imageSrc'] = variant
+                # ...and under an opaque address: the filename is not theirs.
+                payload['imageSrc'] = public_url(variant or gm_src)
             self._send_json({'version': ver, 'payload': payload})
             return
 
@@ -431,7 +718,7 @@ class GMHandler(http.server.SimpleHTTPRequestHandler):
         # actually approving. This is the only place a pending image is ever
         # served, and it is refused to anyone but this machine.
         if parsed.path == '/api/pending':
-            if self.is_remote():
+            if not self.is_loopback():
                 self._send_json({'error': 'forbidden'}, status=403)
                 return
             with state_lock:
@@ -441,7 +728,7 @@ class GMHandler(http.server.SimpleHTTPRequestHandler):
 
         # --- GM drains queued player actions (claims / proposed moves) ---
         if parsed.path == '/api/actions':
-            if self.is_remote():
+            if not self.is_loopback():
                 self._send_json({'error': 'forbidden'}, status=403)
                 return
             global player_actions
@@ -456,14 +743,36 @@ class GMHandler(http.server.SimpleHTTPRequestHandler):
             health = {
                 'status': 'ok',
                 'roots': len(IMAGE_ROOTS),
-                'image_roots': IMAGE_ROOTS,
-                'port': PORT
+                'port': PORT,
+                'pid': os.getpid(),
+                'started': STARTED_AT,
+                'supervisor': SUPERVISOR,
+                'build': web_build(),
+                'python': sys.version.split()[0],
             }
+            # Vault paths are nobody's business but this machine's.
+            if not self.is_remote():
+                health['image_roots'] = IMAGE_ROOTS
+                health['script'] = os.path.abspath(__file__)
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             self.wfile.write(json.dumps(health).encode())
+            return
+
+        if parsed.path == '/api/gm-code':
+            if not self.is_loopback():
+                self._send_json({'error': 'forbidden'}, status=403)
+                return
+            self._send_json({'code': gm_code()})
+            return
+
+        # Which version of the pages is on disk. Open pages compare it with
+        # the one they loaded and offer a reload. Open to players: it is a
+        # hash of file timestamps and says nothing about the vault.
+        if parsed.path == '/api/build':
+            self._send_json({'build': web_build()})
             return
 
         # Poll for pending commands (GM page calls this every 300ms)
@@ -480,6 +789,20 @@ class GMHandler(http.server.SimpleHTTPRequestHandler):
                 self.wfile.write(json.dumps(cmd).encode())
             else:
                 self.wfile.write(b'null')
+            return
+
+        # Published images under opaque addresses (see public_url). Open to
+        # everyone — the token IS the permission, and it only resolves while
+        # the image is on the table.
+        if parsed.path.startswith('/a/'):
+            full = resolve_asset(parsed.path[3:])
+            if not full:
+                self.send_error(404, 'Not found')
+                return
+            try:
+                self.send_file(full)
+            except Exception as e:
+                self.send_error(500, f'Error serving file: {e}')
             return
 
         # Serve map/image files from configured roots
@@ -516,7 +839,7 @@ class GMHandler(http.server.SimpleHTTPRequestHandler):
         # List available maps. This is the vault's index — every handout, every
         # unrevealed map, by name — so it is the GM's alone.
         if parsed.path == '/api/maps':
-            if self.is_remote():
+            if not self.is_loopback():
                 self._send_json({'error': 'forbidden'}, status=403)
                 return
             maps = []
@@ -535,7 +858,7 @@ class GMHandler(http.server.SimpleHTTPRequestHandler):
         # Remote visitors never get the GM control page. The app is now three
         # separate pages, so the GM markup is not merely hidden from them — it is
         # never sent. remote.html carries only the player view.
-        if parsed.path in ('/', '', '/gm.html', '/gm_display.html') and self.is_remote():
+        if parsed.path in ('/', '', '/gm.html', '/gm_display.html') and not self.is_loopback():
             self.send_response(302)
             self.send_header('Location', '/remote.html')
             self.end_headers()
@@ -569,11 +892,15 @@ class GMHandler(http.server.SimpleHTTPRequestHandler):
         if notes_api.handle_post(self, parsed):
             return
 
+        # --- The campaign bulletin board ---
+        if board_api.handle_post(self, parsed):
+            return
+
         # --- Declare (or clear) the players' copy of a split map. GM only. ---
         # Lives here rather than in notes_api because validating the pair means
         # resolving both images against the vault, which is this file's job.
         if parsed.path == '/api/mapkey':
-            if self.is_remote():
+            if not self.is_loopback():
                 self._send_json({'error': 'forbidden'}, status=403)
                 return
             body = self._read_json_body()
@@ -613,7 +940,7 @@ class GMHandler(http.server.SimpleHTTPRequestHandler):
 
         # --- GM pushes authoritative token doc (local only) ---
         if parsed.path == '/api/tokens_state':
-            if self.is_remote():
+            if not self.is_loopback():
                 self._send_json({'error': 'forbidden'}, status=403)
                 return
             body = self._read_json_body()
@@ -629,7 +956,7 @@ class GMHandler(http.server.SimpleHTTPRequestHandler):
 
         # --- GM pushes the heavy player frame (map + fog + crop) (local only) ---
         if parsed.path == '/api/player_state':
-            if self.is_remote():
+            if not self.is_loopback():
                 self._send_json({'error': 'forbidden'}, status=403)
                 return
             body = self._read_json_body()
@@ -651,12 +978,65 @@ class GMHandler(http.server.SimpleHTTPRequestHandler):
                 self._send_json({'error': 'bad body'}, status=400)
                 return
             body['t'] = time.time()
+            # Who may move a token outright rather than propose it is settled
+            # HERE, by the socket, and stamped over whatever the sender wrote.
+            # A remote browser can post kind:'gmmove' all it likes; it arrives
+            # local=False and the GM page drops it.
+            body['local'] = not self.is_remote()
             with state_lock:
                 player_actions.append(body)
                 # Guard against unbounded growth if the GM page is closed.
                 if len(player_actions) > 500:
                     del player_actions[:-500]
             self._send_json({'ok': True})
+            return
+
+        # --- GM code login from the player page (any device) ---
+        # Rate-limited per client: an 8-character code is not guessable in
+        # eight tries per ten minutes.
+        if parsed.path == '/api/gm-login':
+            who = (self.headers.get('X-Forwarded-For') or '').split(',')[0].strip() \
+                or (self.client_address[0] if self.client_address else '')
+            now = time.time()
+            tries = [t for t in _login_tries.get(who, []) if now - t < 600]
+            if len(tries) >= 8:
+                self._send_json({'error': 'too many tries — wait a few minutes'}, status=429)
+                return
+            body = self._read_json_body() or {}
+            if not hmac_eq(_norm_code(body.get('code')), _norm_code(gm_code())):
+                tries.append(now)
+                _login_tries[who] = tries
+                self._send_json({'error': 'that is not the GM code'}, status=403)
+                return
+            _login_tries.pop(who, None)
+            secure = '; Secure' if (self.headers.get('X-Forwarded-Proto') == 'https') else ''
+            data = json.dumps({'ok': True}).encode()
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Set-Cookie', f'{GM_COOKIE}={gm_token()}; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax{secure}')
+            self.send_header('Content-Length', len(data))
+            self.end_headers()
+            self.wfile.write(data)
+            print(f"🔑 GM logged in on the player page from {who}")
+            return
+
+        if parsed.path == '/api/gm-logout':
+            data = json.dumps({'ok': True}).encode()
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Set-Cookie', f'{GM_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax')
+            self.send_header('Content-Length', len(data))
+            self.end_headers()
+            self.wfile.write(data)
+            return
+
+        # --- The GM page shows the code, and can make a new one. This machine only. ---
+        if parsed.path == '/api/gm-code/new':
+            if not self.is_loopback():
+                self._send_json({'error': 'forbidden'}, status=403)
+                return
+            _load_gm_secret(regenerate=True)
+            self._send_json({'code': gm_code()})
             return
 
         # --- A player introduces themselves. Open to remote. ---
@@ -709,7 +1089,7 @@ class GMHandler(http.server.SimpleHTTPRequestHandler):
 
         # --- GM lets someone in, or does not. GM only. ---
         if parsed.path == '/api/pending/resolve':
-            if self.is_remote():
+            if not self.is_loopback():
                 self._send_json({'error': 'forbidden'}, status=403)
                 return
             body = self._read_json_body() or {}
@@ -763,7 +1143,7 @@ class GMHandler(http.server.SimpleHTTPRequestHandler):
         # data: URL or raw base64. Saved under .tools/gm-display/uploads/ inside
         # the vault so it is served via /maps/ like any other vault image. ---
         if parsed.path == '/api/upload':
-            if self.is_remote():
+            if not self.is_loopback():
                 self._send_json({'error': 'forbidden'}, status=403)
                 return
             body = self._read_json_body()
@@ -921,15 +1301,66 @@ def send_command_to_server(url):
         return False
 
 
+def open_gm_page(url):
+    """Open the GM page, in a specific browser profile if one was named.
+
+    Every campaign, roster, fog mask and grid calibration this app has lives in
+    localStorage, which browsers key per PROFILE as well as per origin. So the
+    profile a tab opens in is not cosmetic: land in the wrong one and the app
+    is not "missing data", it is a different, empty world with the same URL.
+    Nothing is lost, but there is no way to tell that from looking at it.
+
+    Left to itself, `webbrowser.open` hands the URL to whichever profile
+    happens to be frontmost. So the command can be named instead:
+
+        --browser-cmd='open -na Dia --args --profile-directory=Default {url}'
+
+    `{url}` is substituted; without it the URL is appended. The command is
+    split like a shell would, but run WITHOUT a shell, so a path with spaces
+    needs quoting and nothing here can turn into shell injection.
+    """
+    cmd = BROWSER_CMD or os.environ.get('GM_DISPLAY_BROWSER') or ''
+    if not cmd.strip():
+        webbrowser.open(url)
+        return
+    try:
+        parts = shlex.split(cmd)
+        parts = [p.replace('{url}', url) for p in parts]
+        if not any('{url}' in p for p in shlex.split(cmd)):
+            parts.append(url)
+        subprocess.Popen(parts,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as e:
+        # A browser that will not start is not a reason for the server not to.
+        print(f"⚠️  --browser-cmd failed ({e}); falling back to the default browser")
+        webbrowser.open(url)
+
+
 def main():
     mode = 'server'  # default
     open_browser = True
     pending_url = None
 
     # Parse args
+    global BIND_HOST, PORT, BROWSER_CMD
     for arg in sys.argv[1:]:
         if arg == '--no-browser':
             open_browser = False
+        elif arg.startswith('--browser-cmd='):
+            # How to open the GM page. Chiefly: which browser PROFILE, since
+            # that decides which localStorage the app wakes up in.
+            BROWSER_CMD = arg.split('=', 1)[1]
+        elif arg == '--lan':
+            # Listen on every interface, so another machine on the wifi can
+            # reach the player page — including whatever box is running ngrok.
+            BIND_HOST = '0.0.0.0'
+        elif arg.startswith('--host='):
+            BIND_HOST = arg.split('=', 1)[1] or '127.0.0.1'
+        elif arg.startswith('--port='):
+            try:
+                PORT = int(arg.split('=', 1)[1])
+            except ValueError:
+                print(f"Ignoring bad --port: {arg}")
         elif arg.startswith('gm://'):
             # Protocol handler mode: POST to running server, then exit
             if send_command_to_server(arg):
@@ -993,6 +1424,10 @@ def main():
             except PermissionError:
                 print(f"Warning: cannot scan {vault_parent} (permission denied, skipping)")
 
+    if mode == 'server' and SUPERVISOR != 'tray' and '--force' not in sys.argv[1:] \
+            and sys.platform == 'darwin' and hand_off_to_tray():
+        return
+
     if not IMAGE_ROOTS:
         print("\n⚠️  WARNING: No image directories found!")
         print("   Maps and images won't load. Check that ~/Documents/RPG/Campaign Vault exists.\n")
@@ -1033,6 +1468,12 @@ def main():
         notes_api.init(vault_root)
     except Exception as e:
         print(f"⚠️  notes_api init failed: {e}")
+    board_api.PUBLIC_URL = public_url
+    notes_api.RESOLVE_MAP = resolve_map_key
+    try:
+        board_api.init(vault_root)
+    except Exception as e:
+        print(f"⚠️  board_api init failed: {e}")
 
     # --- Kill anything on our port before binding ---
     def kill_port(port):
@@ -1048,13 +1489,32 @@ def main():
                 my_pid = str(os.getpid())
                 other_pids = [p for p in pids if p != my_pid]
                 if other_pids:
-                    print(f"Killing stale processes on port {port}: {', '.join(other_pids)}")
+                    # The port has one owner, and it is us. Ask first (a GM
+                    # Display server flushes the bulletin board on SIGTERM),
+                    # then insist.
+                    print(f"Taking port {port} from: {', '.join(other_pids)}")
                     for pid in other_pids:
                         try:
-                            os.kill(int(pid), 9)  # SIGKILL — no mercy
+                            os.kill(int(pid), signal.SIGTERM)
                         except (ProcessLookupError, PermissionError):
                             pass
-                    time.sleep(0.5)
+                    for _ in range(20):
+                        time.sleep(0.1)
+                        alive = []
+                        for pid in other_pids:
+                            try:
+                                os.kill(int(pid), 0)
+                                alive.append(pid)
+                            except (ProcessLookupError, PermissionError):
+                                pass
+                        if not alive:
+                            break
+                    for pid in other_pids:
+                        try:
+                            os.kill(int(pid), signal.SIGKILL)
+                        except (ProcessLookupError, PermissionError):
+                            pass
+                    time.sleep(0.3)
                     return True
         except Exception:
             pass
@@ -1063,13 +1523,23 @@ def main():
     # --- Bind with retry ---
     # ThreadingHTTPServer so many player browsers polling /api/sync concurrently
     # don't serialize behind one another (and behind the GM's own polling).
-    ServerClass = getattr(http.server, 'ThreadingHTTPServer', http.server.HTTPServer)
-    ServerClass.allow_reuse_address = True
-    ServerClass.daemon_threads = True
+    BaseServer = getattr(http.server, 'ThreadingHTTPServer', http.server.HTTPServer)
+
+    class ServerClass(BaseServer):
+        allow_reuse_address = True
+        daemon_threads = True
+
+        def handle_error(self, request, client_address):
+            # A browser that reloads or closes a tab mid-request (the board's
+            # long poll, most often) is not an error worth a traceback.
+            exc = sys.exc_info()[1]
+            if isinstance(exc, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)):
+                return
+            super().handle_error(request, client_address)
     server = None
     for attempt in range(5):
         try:
-            server = ServerClass(('127.0.0.1', PORT), GMHandler)
+            server = ServerClass((BIND_HOST, PORT), GMHandler)
             break
         except OSError as e:
             if 'Address already in use' in str(e):
@@ -1088,18 +1558,29 @@ def main():
         sys.exit(1)
 
     print(f"🎲 GM Display Server running on http://localhost:{PORT}")
+    if BIND_HOST in ('0.0.0.0', '::'):
+        lan = lan_address()
+        print(f"   Listening on every interface (--lan).")
+        if lan:
+            print(f"   Players / ngrok:  http://{lan}:{PORT}/remote.html")
+            print(f"   Point a tunnel at http://{lan}:{PORT}  (it lands on the player page)")
+        print(f"   Anyone on this network can reach the PLAYER view. The GM page")
+        print(f"   stays loopback-only — they get redirected, same as a tunnel visitor.")
+    else:
+        print(f"   Loopback only. Another machine (an ngrok host) cannot reach this;")
+        print(f"   restart with --lan if you need it to.")
     print(f"   Press Ctrl+C to stop\n")
 
-    # Handle clean shutdown — only on SIGINT (Ctrl+C)
-    # SIGTERM is logged but ignored (prevents gm:// handler from killing us)
-    def handle_sigint(sig, frame):
-        print("\nShutting down (Ctrl+C)...")
+    # Ctrl+C and SIGTERM both stop the server cleanly. SIGTERM used to be
+    # ignored, which is exactly why "Restart Server" in the menu bar never
+    # restarted anything: the old process shrugged it off and kept serving
+    # the old code.
+    def handle_stop(sig, frame):
+        print(f"\nShutting down ({'Ctrl+C' if sig == signal.SIGINT else 'SIGTERM'})...")
         # Shutdown from a separate thread to avoid deadlocking serve_forever()
         threading.Thread(target=server.shutdown, daemon=True).start()
-    def handle_sigterm(sig, frame):
-        print(f"\n⚠️  Ignoring SIGTERM (pid {os.getpid()}) — use Ctrl+C to stop the server")
-    signal.signal(signal.SIGINT, handle_sigint)
-    signal.signal(signal.SIGTERM, handle_sigterm)
+    signal.signal(signal.SIGINT, handle_stop)
+    signal.signal(signal.SIGTERM, handle_stop)
     # Ignore SIGPIPE (broken pipe from disconnected clients)
     if hasattr(signal, 'SIGPIPE'):
         signal.signal(signal.SIGPIPE, signal.SIG_IGN)
@@ -1107,14 +1588,96 @@ def main():
     # Open browser to GM page (only on interactive start, not when launched by app)
     if open_browser:
         if mode in ('server', 'server_then_command'):
-            threading.Timer(0.5, lambda: webbrowser.open(f'http://localhost:{PORT}')).start()
+            threading.Timer(0.5, lambda: open_gm_page(f'http://localhost:{PORT}')).start()
     if mode == 'server_then_command' and pending_url:
         def delayed_command():
             time.sleep(1)
             send_command_to_server(pending_url)
         threading.Thread(target=delayed_command, daemon=True).start()
 
+    threading.Thread(target=watch_sources, args=(server,), daemon=True).start()
     server.serve_forever()
+
+    # --- stopped: by a signal, or because our own code changed ---
+    try:
+        board_api.flush()            # a drag in the last second is still worth keeping
+    except Exception:
+        pass
+    server.server_close()
+    if _restart[0]:
+        # Same process, same arguments, new code. Never re-open a browser tab
+        # and never re-send a one-shot gm:// command.
+        args = [a for a in sys.argv[1:] if not a.startswith('gm://')]
+        if '--no-browser' not in args:
+            args.append('--no-browser')
+        print('🔄 Restarting with the new code…\n', flush=True)
+        os.execv(sys.executable, [sys.executable, os.path.abspath(__file__)] + args)
+
+
+_restart = [False]
+
+
+def watch_sources(server):
+    """Restart in place when server.py / notes_api.py / board_api.py change.
+
+    Waits for the files to stop changing (a deploy writes several), and
+    refuses to restart onto code that does not compile — a half-saved file
+    must not take the table down."""
+    paths = [os.path.join(STATIC_DIR, f) for f in PY_SOURCES]
+    base = _stamp_of(paths)
+    while True:
+        time.sleep(1.0)
+        cur = _stamp_of(paths)
+        if cur == base:
+            continue
+        while True:                      # settle
+            time.sleep(1.5)
+            again = _stamp_of(paths)
+            if again == cur:
+                break
+            cur = again
+        bad = None
+        for p in paths:
+            try:
+                with open(p, encoding='utf-8') as f:
+                    compile(f.read(), p, 'exec')
+            except FileNotFoundError:
+                continue
+            except Exception as e:
+                bad = f'{os.path.basename(p)}: {e}'
+                break
+        if bad:
+            print(f"⚠️  New server code does not compile — staying on the running version.\n   {bad}", flush=True)
+            base = cur
+            continue
+        print('🔄 Server code changed on disk — restarting to pick it up.', flush=True)
+        _restart[0] = True
+        server.shutdown()
+        return
+
+
+def hand_off_to_tray():
+    """If the menu-bar app is already running the server, a second copy from
+    a Terminal would only fight it for the port. Ask the app to restart its
+    server instead (which picks up the current code) and step aside."""
+    try:
+        import urllib.request
+        with urllib.request.urlopen(f'http://127.0.0.1:{PORT}/api/health', timeout=1) as r:
+            h = json.loads(r.read())
+    except Exception:
+        return False
+    if h.get('supervisor') != 'tray':
+        return False
+    try:
+        subprocess.run(['open', '-g', 'gm://control/restart'], timeout=5)
+    except Exception as e:
+        print(f"⚠️  Could not reach the GM Display menu-bar app ({e}).")
+        return False
+    print("⚔️  The GM Display menu-bar app runs the server, so it has been asked to")
+    print("   restart it with the current code. Nothing else to do here.")
+    print("   Log:  tail -f ~/Library/Logs/gm-display.log")
+    print("   (To run it from this Terminal instead: quit the menu-bar app, or pass --force.)")
+    return True
 
 
 if __name__ == '__main__':

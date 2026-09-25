@@ -1,6 +1,6 @@
 // GM Display — projector.js
 // Projector mirror: draws tokens, grid and markers under the keystone warp.
-import { drawMapGrid, isParty, kTokenDiam, tokenFrac } from './geometry.js';
+import { clamp01, drawMapGrid, isParty, kTokenDiam, snapNorm, tokenFrac } from './geometry.js';
 import { ensureMarkerLoop } from './markers.js';
 import { S } from './store.js';
 import { applyGridWire, tokenFillOpacity } from './tokens.js';
@@ -26,6 +26,10 @@ export function drawProjectorOverlay() {
   const xf = S.playerRenderXform;
   const tc = document.getElementById('player-token-canvas');
   if (!tc || !xf) return;
+  // snapNorm() and the cell helpers read S.mapWidth/S.mapHeight through
+  // mapDims(); on this window nothing else sets them, and without them a drag
+  // here would snap against a map one pixel wide.
+  S.mapWidth = xf.mapW; S.mapHeight = xf.mapH;
   tc.width = xf.wW; tc.height = xf.wH;
   tc.style.width = xf.wW + 'px'; tc.style.height = xf.wH + 'px';
   const ctx = tc.getContext('2d');
@@ -114,4 +118,137 @@ function projTokenImg(src) {
   const im = new Image(); im.onload = () => drawProjectorOverlay(); im.src = src;
   _projImgCache[src] = im;
   return null;
+}
+
+// ===================================================================
+// DRAGGING ON THE PROJECTOR
+// ===================================================================
+// The map display draws its tokens into a canvas, so there is no element to
+// grab and no browser hit-testing to lean on: a pointer position has to be
+// walked back through every transform between the screen and the map before it
+// means anything.
+//
+// Three of them, in order:
+//   1. the keystone warp (a projective matrix3d on #player-canvas-wrap),
+//   2. the rotation baked into the canvas by ctx.rotate,
+//   3. the crop/scale from map pixels to canvas pixels (normToProjPre).
+// Skipping (1) is the tempting shortcut and it is wrong the moment a corner is
+// nudged: on a keystoned projector the token would land somewhere near where
+// you pointed and drift further the closer you got to a corner.
+
+// Screen point -> the wrap's own untransformed pixels (which are canvas pixels,
+// since the canvas is display:block sized in CSS px to match its backing store).
+function projPointerToCanvas(clientX, clientY) {
+  const wrap = document.getElementById('player-canvas-wrap');
+  const rot = document.getElementById('player-rotation-wrap');
+  if (!wrap || !rot) return null;
+  // The rotation wrap is a pass-through (applyProjectionTransform sets it to
+  // 'none' and bakes rotation into the canvas), so its box is the wrap's
+  // geometry BEFORE the keystone — the one fixed point we can measure from.
+  const r = rot.getBoundingClientRect();
+  const lx = clientX - r.left, ly = clientY - r.top;
+  const css = getComputedStyle(wrap).transform;
+  if (!css || css === 'none') return { x: lx, y: ly };
+  // transform-origin is '0 0' whenever a transform is set (see
+  // applyProjectionTransform), so the computed matrix is the whole story.
+  try {
+    const p = new DOMMatrix(css).inverse().transformPoint(new DOMPoint(lx, ly, 0, 1));
+    const w = p.w || 1;
+    return { x: p.x / w, y: p.y / w };
+  } catch (e) {
+    return { x: lx, y: ly };            // singular matrix: better than nothing
+  }
+}
+
+// Canvas pixels -> the pre-rotation space normToProjPre() draws in.
+function projCanvasToPre(cx, cy, xf) {
+  let dx = cx - xf.wW / 2, dy = cy - xf.wH / 2;
+  if (xf.rot) {
+    const a = -xf.rot * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+    return { x: dx * c - dy * s, y: dx * s + dy * c };
+  }
+  return { x: dx, y: dy };
+}
+
+// ...and back out to map-normalized coords. The inverse of normToProjPre.
+function projPreToNorm(p, xf) {
+  const mx = (p.x + xf.preW / 2) / xf.scale + xf.srcX;
+  const my = (p.y + xf.preH / 2) / xf.scale + xf.srcY;
+  return { tx: clamp01(mx / xf.mapW), ty: clamp01(my / xf.mapH) };
+}
+
+// The topmost token under the pointer, or null. Searched back to front because
+// that is the order they were painted in.
+function projTokenAt(clientX, clientY) {
+  const xf = S.playerRenderXform;
+  if (!xf) return null;
+  const c = projPointerToCanvas(clientX, clientY);
+  if (!c) return null;
+  const q = projCanvasToPre(c.x, c.y, xf);
+  const unit = kTokenDiam(xf.mapW) * xf.scale / 2;
+  const list = S.pTokens.filter(t => t.onMap);
+  for (let i = list.length - 1; i >= 0; i--) {
+    const t = list[i];
+    const p = normToProjPre(t.tx, t.ty, xf);
+    if (Math.hypot(q.x - p.x, q.y - p.y) <= unit * tokenFrac(t)) return t;
+  }
+  return null;
+}
+
+// This window is a mirror, not an authority. It moves the token on its own
+// canvas so the drag looks live, and tells the GM page, which owns the roster,
+// persists it and fans the move back out to everyone else.
+let _projMoveTimer = null;
+function sendProjMove(id, tx, ty, final) {
+  if (!S.playerChannel) return;
+  const post = () => S.playerChannel.postMessage({ type: 'token-move', id, tx, ty });
+  if (final) { clearTimeout(_projMoveTimer); _projMoveTimer = null; post(); return; }
+  if (_projMoveTimer) return;
+  _projMoveTimer = setTimeout(() => { _projMoveTimer = null; post(); }, 90);
+}
+
+export function attachProjectorTokenDrag() {
+  const wrap = document.getElementById('player-canvas-wrap');
+  if (!wrap || wrap._tokDragWired) return;
+  wrap._tokDragWired = true;
+  let drag = null;
+
+  wrap.addEventListener('pointerdown', (e) => {
+    if (S.playerDisplay !== 'map') return;
+    const t = projTokenAt(e.clientX, e.clientY);
+    if (!t) return;
+    e.preventDefault();
+    try { wrap.setPointerCapture(e.pointerId); } catch (err) {}
+    drag = { t, tx: t.tx, ty: t.ty };
+    wrap.style.cursor = 'grabbing';
+  });
+
+  wrap.addEventListener('pointermove', (e) => {
+    if (!drag) {
+      // Nothing here looks grabbable, so the cursor has to say so.
+      if (S.playerDisplay === 'map') {
+        wrap.style.cursor = projTokenAt(e.clientX, e.clientY) ? 'grab' : '';
+      }
+      return;
+    }
+    const xf = S.playerRenderXform;
+    const c = projPointerToCanvas(e.clientX, e.clientY);
+    if (!xf || !c) return;
+    const n = projPreToNorm(projCanvasToPre(c.x, c.y, xf), xf);
+    const s = snapNorm(n.tx, n.ty);
+    drag.tx = s.tx; drag.ty = s.ty;
+    drag.t.tx = s.tx; drag.t.ty = s.ty;   // optimistic; the GM page confirms
+    drawProjectorOverlay();
+    sendProjMove(drag.t.id, s.tx, s.ty, false);
+  });
+
+  const end = (e) => {
+    if (!drag) return;
+    try { wrap.releasePointerCapture(e.pointerId); } catch (err) {}
+    sendProjMove(drag.t.id, drag.tx, drag.ty, true);
+    drag = null;
+    wrap.style.cursor = '';
+  };
+  wrap.addEventListener('pointerup', end);
+  wrap.addEventListener('pointercancel', end);
 }

@@ -78,6 +78,10 @@ S.remoteScale = 1;             // px per map-px for the current crop
 S.remoteImg = null;            // cached map image for repaints on resize
 S.remoteMarkerMode = false;
 S.remoteScreen = 'select';     // 'select' (roster) | 'play' (map)
+// Set from /api/sync, which answers it from the socket the poll arrived on:
+// true only when the player page is being served to this machine. The GM's own
+// browser, in other words — never something a visitor can assert.
+S.remoteIsGM = false;
 S.remotePlayerColor = '#39ff14';
 S._remoteRestoreDone = false;  // auto-restore the claimed character once after a refresh
 export const REMOTE_COLORS = ['#39ff14', '#ff2db3', '#27c4ff', '#ffd23f', '#ff7a1a', '#b06bff', '#ff4d4d', '#1ee0b0'];

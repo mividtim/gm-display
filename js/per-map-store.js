@@ -13,7 +13,9 @@ import { activeBg, updateBgUI } from './projection.js';
 import { updateUndoRedoButtons } from './sidebar.js';
 import { gameKey } from './state.js';
 import { S } from './store.js';
-import { refreshTokenImageOptions, renderGMTokens } from './tokens.js';
+import { isShared, toggleShare, updateShareFloat } from './board-gm.js';
+import { applyTool } from './tools.js';
+import { applyGridVisibilityForContext, refreshTokenImageOptions, renderGMTokens } from './tokens.js';
 export function fogStoragePrefix() {
   return gameKey(S.fogContext === 'show' ? 'fog:show:' : 'fog:');
 }
@@ -73,6 +75,11 @@ export function setFogContext(target) {
   S.fogContext = target;
   applyFogSnapshot(target === 'map' ? S.stashedMapFog : S.stashedShowFog);
   updateUndoRedoButtons();
+  // The fog brush only exists for maps; the presets bar goes with it.
+  applyTool();
+  applyGridVisibilityForContext();
+  const presets = document.getElementById('fog-presets-bar');
+  if (presets && S.currentMode === 'fog') presets.style.display = target === 'show' ? 'none' : '';
   // Token overlay is map-only; redraw so it appears/disappears on context switch.
   if (typeof renderGMTokens === 'function') renderGMTokens();
 }
@@ -87,6 +94,7 @@ const FOG_KEY_PREFIX = 'gm-display-fog:';
 
 export function savePerMapFog(mapSrc) {
   if (!mapSrc || mapSrc.startsWith('data:')) return;
+  if (S.fogContext === 'show') return;       // handouts carry no fog
   try {
     // Save active preset's current fogMask into the presets array
     if (S.fogMask && S.fogPresets[S.activePresetIdx]) {
@@ -317,6 +325,7 @@ function renderLibrary() {
   S.imageLibrary.forEach((entry, idx) => {
     container.appendChild(buildLibraryCard(entry, idx, 'sidecar'));
   });
+  updateShareFloat();
 }
 
 function buildLibraryCard(entry, idx, target) {
@@ -379,6 +388,19 @@ function buildLibraryCard(entry, idx, target) {
     input.select();
   };
   card.appendChild(label);
+
+  // Handouts: the separate, deliberate click that puts one in front of the
+  // players — pinned to the campaign's bulletin board.
+  if (!isProjector) {
+    const share = document.createElement('button');
+    share.className = 'lib-share' + (isShared(entry.src) ? ' on' : '');
+    share.dataset.src = entry.src;
+    share.textContent = '📌';
+    share.title = isShared(entry.src) ? 'On the players’ bulletin board — click to take it off'
+                                      : 'Share with the players (pin to the campaign board)';
+    share.onclick = (e) => { e.stopPropagation(); toggleShare(entry.src, entry.name); };
+    card.appendChild(share);
+  }
 
   const del = document.createElement('button');
   del.className = 'lib-delete';
@@ -543,8 +565,12 @@ export function refreshArtVaultOptions() {
   }).catch(() => {});
 }
 
+function artType() {
+  return (document.getElementById('art-type') || {}).value || 'image';
+}
+
 function artTargetLibraryAdd(path, name) {
-  const type = (document.getElementById('art-type') || {}).value || 'map';
+  const type = artType();
   if (type === 'image') addToImageLibrary(path, name);
   else addToMapLibrary(path, name);
   setStatus(`Added to library (${type === 'image' ? 'Image → Sidecar' : 'Map → Projector'}): ${decodeURIComponent(name)}`);
@@ -558,30 +584,86 @@ export function addArtFromVault() {
   sel.value = '';
 }
 
-// Upload a file from disk into the vault (server saves it under
-// .tools/gm-display/uploads/), then add it to the chosen library.
+// Upload files from disk into the vault (the server saves them under
+// .tools/gm-display/uploads/), then add each to the library chosen in "Add
+// artwork" — handouts (Image → Sidecar) unless you pick Map. Any number at
+// once: drop a folder's worth on the drop zone or the library, or pick several
+// in Upload….
+const IMAGE_TYPES = /^image\/(png|jpe?g|webp|gif)$/i;
+const IMAGE_EXT = /\.(png|jpe?g|webp|gif)$/i;
+
+export async function uploadArtFiles(fileList) {
+  const files = Array.from(fileList || []).filter(f => IMAGE_TYPES.test(f.type) || IMAGE_EXT.test(f.name));
+  const skipped = (fileList ? fileList.length : 0) - files.length;
+  if (!files.length) { setStatus('Nothing to add — only PNG, JPEG, WebP and GIF images.'); return; }
+  const type = artType();
+  const where = type === 'image' ? 'handouts' : 'maps';
+  let done = 0, failed = [];
+  for (const file of files) {
+    setStatus(`Uploading ${done + 1} of ${files.length} to ${where}: ${file.name}…`);
+    try {
+      const data = await new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(r.result); r.onerror = () => rej(r.error);
+        r.readAsDataURL(file);
+      });
+      const res = await (await fetch('/api/upload', {
+        method: 'POST', body: JSON.stringify({ name: file.name, data }),
+      })).json();
+      if (!res.ok) throw new Error(res.error || 'upload refused');
+      if (type === 'image') addToImageLibrary(res.path, res.name);
+      else addToMapLibrary(res.path, res.name);
+      done++;
+    } catch (e) {
+      failed.push(file.name + ' (' + (e.message || e) + ')');
+    }
+  }
+  refreshArtVaultOptions();
+  refreshTokenImageOptions();
+  setStatus(`Added ${done} of ${files.length} to ${where}`
+    + (skipped ? ` · skipped ${skipped} that were not images` : '')
+    + (failed.length ? ` · failed: ${failed.join(', ')}` : ''));
+}
+
 export function initArtUploadInput() {
   const inp = document.getElementById('art-file-input');
-  if (!inp) return;
-  inp.addEventListener('change', () => {
-    const file = inp.files && inp.files[0];
-    inp.value = '';
-    if (!file) return;
-    setStatus(`Uploading ${file.name}…`);
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      fetch('/api/upload', {
-        method: 'POST',
-        body: JSON.stringify({ name: file.name, data: e.target.result })
-      }).then(r => r.json()).then(res => {
-        if (!res.ok) { setStatus(`Upload failed: ${res.error || 'unknown error'}`); return; }
-        artTargetLibraryAdd(res.path, res.name);
-        refreshArtVaultOptions();
-        refreshTokenImageOptions();
-      }).catch(err => setStatus(`Upload failed: ${err}`));
-    };
-    reader.readAsDataURL(file);
-  });
+  if (inp) {
+    inp.multiple = true;
+    inp.addEventListener('change', () => {
+      const files = Array.from(inp.files || []);
+      inp.value = '';
+      uploadArtFiles(files);
+    });
+  }
+  // Remember Map vs Image between sessions.
+  const sel = document.getElementById('art-type');
+  if (sel) {
+    try { const v = localStorage.getItem('gm-display:art-type'); if (v === 'map' || v === 'image') sel.value = v; } catch (e) {}
+    sel.addEventListener('change', () => { try { localStorage.setItem('gm-display:art-type', sel.value); } catch (e) {} });
+  }
+  // A near miss must not navigate the GM page away to the dropped image.
+  if (!document._noFileNav) {
+    document._noFileNav = true;
+    const isFiles = (e) => e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
+    document.addEventListener('dragover', (e) => { if (isFiles(e)) e.preventDefault(); });
+    document.addEventListener('drop', (e) => { if (isFiles(e)) e.preventDefault(); });
+  }
+  // The library itself takes a drop of files too (card reordering drags
+  // carry no files, so the two never collide).
+  const lib = document.getElementById('library-wrap');
+  const zone = lib && lib.parentElement;
+  if (zone && !zone._fileDrop) {
+    zone._fileDrop = true;
+    zone.addEventListener('dragover', (e) => {
+      if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) e.preventDefault();
+    });
+    zone.addEventListener('drop', (e) => {
+      if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
+      if (e.target.closest && e.target.closest('#drop-zone')) return;   // the drop zone handles its own
+      e.preventDefault();
+      uploadArtFiles(e.dataTransfer.files);
+    });
+  }
 }
 // Stub for the original body — never reached; here to keep the inert tail
 // of the original function from causing parse errors. We immediately return.

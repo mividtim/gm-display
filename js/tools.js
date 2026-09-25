@@ -63,7 +63,8 @@ export function setActiveTool(name, opts) {
 // these elements, or we are back to two sources of truth.
 export function applyTool() {
   const t = S.activeTool;
-  const fogTool = (t === 'reveal' || t === 'hide');
+  // Handouts have no fog, so on a handout the brush is simply not there.
+  const fogTool = (t === 'reveal' || t === 'hide') && S.fogContext !== 'show';
 
   const fog = el('gm-fog-canvas');
   if (fog) {
@@ -118,8 +119,13 @@ export function renderToolbar() {
     bar.querySelectorAll('[data-tool]').forEach(b =>
       b.addEventListener('click', () => setActiveTool(b.dataset.tool)));
   }
-  bar.querySelectorAll('[data-tool]').forEach(b =>
-    b.classList.toggle('active', b.dataset.tool === S.activeTool));
+  const noFog = S.fogContext === 'show';
+  bar.querySelectorAll('[data-tool]').forEach(b => {
+    b.classList.toggle('active', b.dataset.tool === S.activeTool);
+    const fogBtn = b.dataset.tool === 'reveal' || b.dataset.tool === 'hide';
+    b.disabled = fogBtn && noFog;
+    b.style.opacity = (fogBtn && noFog) ? '0.35' : '';
+  });
   const hint = el('tool-hint');
   if (hint) hint.textContent = (TOOL_META[S.activeTool] || {}).hint || '';
 }

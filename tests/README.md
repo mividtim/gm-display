@@ -425,3 +425,75 @@ ring and the editor *immediately* rather than after the 600ms debounce and a
 round-trip, because that is the one edit whose outcome is not in doubt. If the
 save then fails, the map is repainted from the vault, so a lost note comes
 back rather than staying invisibly gone.
+
+### The party log, and why the timestamp lives in the markdown
+
+Party notes had no times at all — the file recorded *who* and *what*, never
+*when* — so "in the order they were entered" was not a sort anyone could do.
+The time had to start being recorded before the feature could exist.
+
+It goes in the note line itself rather than a sidecar index:
+
+    - **Sir Tim** (2026-09-16 21:05 · edited 2026-09-17 00:50) — we camped here
+
+because this file is opened in Obsidian and edited by hand, and a separate
+index would silently fall out of step the first time that happened. The
+parenthesis is optional coming back in, so lines written before this existed —
+or typed by a GM who did not bother — still load. They have no time, sort
+first (they are older than anything dated, by definition), and the log says
+"before times were kept" rather than inventing one.
+
+Rewriting your own line keeps the time it was **entered**, so fixing a typo
+does not jump the note to the bottom of the log. A change made later also
+records when, because otherwise an entry becomes a different note quietly
+wearing an old timestamp. A rewrite inside the same minute is not called an
+edit — that is one act of writing, not a revision.
+
+`tests/party-log.py` covers the vault half and then runs `party-log.mjs`,
+which drives the real modules in a jsdom document: the order, the escaping of
+player-typed text, and that each button actually toggles its panel. It is not
+a browser — `session.py` is still the only thing that proves any of this
+against a real canvas — but it is enough to catch a broken binding or a
+regression in the ordering without one.
+
+### Hide-the-grid was written to one place and read back from another
+
+"Show grid" is stored twice: in the campaign roster (`tokenGridShow`) and in
+the per-map key (`show`). A page load restores the roster and then applies the
+map key over the top — so the map key wins. The toggle only ever saved the
+roster, which meant the map key's stale `show: true` was reapplied on every
+refresh and the grid came back. It had never been sticky.
+
+The toggle now writes both. Whether to draw our grid is a property of the MAP
+anyway: one map has a grid printed on it and the next does not.
+
+That introduced a second-order trap worth knowing about. `applySavedMapKey`
+treats *any* stored key as "this browser has calibrated this map", and skips
+the calibration a map can ship in the vault. Once hiding the grid writes a key,
+a never-calibrated map would stop adopting its shipped calibration. So the
+adopt-from-vault path now keys off whether there is an actual calibration
+(`keyCellPx`) rather than whether a key exists, and when it adopts one that
+way it leaves the grid's on/off alone — the GM has said that out loud, and the
+vault should not talk over them.
+
+`tests/grid-sticky.mjs` drives the real `tokens.js` against a real
+localStorage and replays what a page load does, including that second case.
+
+### A hex accumulates notes
+
+Party notes were one-entry-per-player-per-cell: writing again replaced your own
+line. Coming back to a hex you have already written about is the normal case
+at a table, though — you saw something new — so a second note is now a second
+entry, and the log grows rather than being rewritten.
+
+Entries are addressed by `(who, when)`, which is why the stored stamp carries
+seconds even though every display rounds to the minute: two notes on one hex in
+the same minute have to remain distinguishable. Two *different* players can
+share a timestamp and still be distinct, because the author is half the key —
+a test asserts exactly that, after an earlier version of it accidentally
+proved the opposite.
+
+The API follows from that: a POST without `at` adds; with `at` it changes or
+removes that one entry, and only if it is yours. An empty note with no `at` is
+nothing to say, and is refused rather than quietly deleting something — which
+is what the old "empty means delete" rule would have turned into.

@@ -1,0 +1,14 @@
+{
+  "name": "gm-display-dev",
+  "private": true,
+  "description": "Dev tooling and tests only. The app itself is dependency-free ES modules served straight from disk.",
+  "devDependencies": {
+    "acorn": "^8.18.0",
+    "eslint-scope": "^9.1.2",
+    "jsdom": "^30.0.1"
+  },
+  "scripts": {
+    "test:party-log": "python3 tests/party-log.py",
+    "test:grid-sticky": "node tests/grid-sticky.mjs"
+  }
+}

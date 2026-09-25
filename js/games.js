@@ -13,6 +13,7 @@ import { sendProjectionSettings, updateBgUI, updateRotationUI } from './projecti
 import { updateUndoRedoButtons } from './sidebar.js';
 import { gameKey, modulesInCampaign, saveCampaignsIndex, saveGamesIndex, slugify } from './state.js';
 import { S } from './store.js';
+import { announceCampaign } from './board-gm.js';
 import { broadcastTokens, loadTokens, pushTokensToServer, renderGMTokens, renderTokenList } from './tokens.js';
 export function renderCampaignSelector() {
   const sel = document.getElementById('campaign-select');
@@ -101,6 +102,7 @@ export function moveModulePrompt() {
   // Reload tokens for the new campaign context.
   loadTokens(); renderTokenList(); renderGMTokens(); broadcastTokens(); pushTokensToServer();
   renderCampaignSelector(); renderGameSelector();
+  announceCampaign();
   setStatus(`Moved "${g.name}" to campaign: ${S.campaigns.find(c => c.slug === target).name}`);
 }
 
@@ -128,6 +130,7 @@ function switchGame(slug) {
   renderGameSelector();
   renderMapLibrary();
   renderImageLibrary();
+  announceCampaign();                 // the players' board follows the campaign
   setStatus(`Switched to module: ${g.name}`);
 }
 
@@ -526,7 +529,12 @@ export function restoreState() {
 // Read the active sidecar fog (if any) for a given image src. Returns
 // { mask, w, h } or null. Used by sendShowContent to auto-apply stored fog
 // when a handout is displayed on the sidecar.
+const HANDOUT_FOG_DISABLED = true;
 export function loadShowFogForSrc(src) {
+  // Handouts no longer carry fog: they go to the sidecar and to the players'
+  // bulletin board whole. Any mask painted before that change stays in
+  // localStorage untouched, but nothing reads it.
+  if (HANDOUT_FOG_DISABLED) return null;
   if (!src || src.startsWith('data:')) return null;
   try {
     const raw = localStorage.getItem(gameKey('fog:show:' + src));

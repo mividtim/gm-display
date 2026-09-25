@@ -1,225 +1,154 @@
 #!/bin/bash
-# Build the GM Display macOS app
+# Build and install the GM Display menu-bar app (⚔️).
 #
-# Tries to compile a native Swift menu bar app (⚔️ in menu bar).
-# Falls back to AppleScript if Swift compilation fails.
+#   ./build_app.sh
+#
+# The app is the ONE thing that runs the server. It runs server.py straight out
+# of this folder (never a copy inside the app), as its own child process, and
+# owns port 7680. This script:
+#
+#   1. retires the old launchd daemon (com.gm-display.server), which ran python
+#      without Documents access and fought the app for the port;
+#   2. stops anything else holding the port;
+#   3. compiles gm_menubar.swift into ~/Applications/GM Display.app;
+#   4. registers the gm:// URL scheme and adds the app to Login Items;
+#   5. launches it and waits for the server to answer.
+#
+# Re-run it only when gm_menubar.swift changes. Changes to the server and the
+# pages do not need it: the server restarts itself when its code changes, and
+# open pages offer a reload.
+set -u
 
 APP_NAME="GM Display"
 APP_DIR="$HOME/Applications/${APP_NAME}.app"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUNDLE_ID="com.gm-display.app"
+PORT=7680
+UID_NUM="$(id -u)"
 
-echo "Building ${APP_NAME}.app..."
-echo ""
+say() { printf '%s\n' "$*"; }
 
-# --- Stop any running instance ---
-echo "Stopping any running GM Display..."
-LAUNCHD_PLIST="$HOME/Library/LaunchAgents/com.gm-display.server.plist"
-launchctl bootout gui/$(id -u) "${LAUNCHD_PLIST}" 2>/dev/null
-rm -f "${LAUNCHD_PLIST}" 2>/dev/null
-lsof -ti :7680 2>/dev/null | xargs kill 2>/dev/null
-pkill -f "gm-display" 2>/dev/null
-sleep 0.5
+say "GM Display — building the menu-bar app"
+say "  server.py: ${SCRIPT_DIR}/server.py"
+say ""
 
-rm -rf "${APP_DIR}"
-mkdir -p "$HOME/Applications"
-
-# --- Try Swift compilation ---
-SWIFT_SRC="${SCRIPT_DIR}/gm_menubar.swift"
-BINARY="/tmp/gm-display-binary"
-USE_SWIFT=false
-
-echo "Attempting Swift compilation..."
-if command -v swiftc &>/dev/null; then
-    # Try compiling without target flag (works on any arch)
-    if swiftc -O -o "${BINARY}" "${SWIFT_SRC}" -framework Cocoa 2>/tmp/swiftc_err.log; then
-        USE_SWIFT=true
-        echo "  Swift: compiled ✓ (native menu bar app)"
-    else
-        echo "  Swift compilation failed:"
-        cat /tmp/swiftc_err.log | head -5
-        echo "  Falling back to AppleScript..."
-    fi
-else
-    echo "  swiftc not found. Install Xcode CLT: xcode-select --install"
-    echo "  Falling back to AppleScript..."
+# --- 0. Swift ---------------------------------------------------------------
+if ! command -v swiftc >/dev/null 2>&1; then
+    say "✗ swiftc not found. Install the Xcode command-line tools:"
+    say "    xcode-select --install"
+    exit 1
 fi
 
-if $USE_SWIFT; then
-    # === SWIFT APP BUNDLE ===
-    mkdir -p "${APP_DIR}/Contents/MacOS"
-    mkdir -p "${APP_DIR}/Contents/Resources"
+# --- 1. retire the old launchd daemon ----------------------------------------
+say "Retiring the old launchd daemon (if any)…"
+for plist in "$HOME/Library/LaunchAgents"/com.gm-display*.plist; do
+    [ -e "$plist" ] || continue
+    label="$(basename "$plist" .plist)"
+    launchctl bootout "gui/${UID_NUM}/${label}" 2>/dev/null
+    mkdir -p "$HOME/.Trash"
+    mv -f "$plist" "$HOME/.Trash/${label}.plist.$(date +%s)"
+    say "  removed ${label} (moved to the Trash)"
+done
+launchctl bootout "gui/${UID_NUM}/com.gm-display.server" 2>/dev/null
 
-    cp "${BINARY}" "${APP_DIR}/Contents/MacOS/gm-display"
-    chmod +x "${APP_DIR}/Contents/MacOS/gm-display"
-    rm -f "${BINARY}"
+# --- 2. stop the running app and anything on the port ------------------------
+say "Stopping the running app and anything on port ${PORT}…"
+osascript -e "tell application id \"${BUNDLE_ID}\" to quit" 2>/dev/null
+sleep 1
+pkill -x gm-display 2>/dev/null
+PIDS="$(lsof -nP -ti tcp:${PORT} -sTCP:LISTEN 2>/dev/null)"
+if [ -n "$PIDS" ]; then
+    kill $PIDS 2>/dev/null
+    sleep 1.5
+    PIDS="$(lsof -nP -ti tcp:${PORT} -sTCP:LISTEN 2>/dev/null)"
+    [ -n "$PIDS" ] && kill -9 $PIDS 2>/dev/null
+fi
 
-    cat > "${APP_DIR}/Contents/Info.plist" << EOF
+# --- 3. compile ----------------------------------------------------------------
+say "Compiling gm_menubar.swift…"
+BINARY="$(mktemp -t gm-display)"
+if ! swiftc -O -o "${BINARY}" "${SCRIPT_DIR}/gm_menubar.swift" -framework Cocoa 2>/tmp/gm-display-swiftc.log; then
+    say "✗ Swift compilation failed:"
+    head -30 /tmp/gm-display-swiftc.log
+    exit 1
+fi
+say "  compiled ✓"
+
+rm -rf "${APP_DIR}"
+mkdir -p "${APP_DIR}/Contents/MacOS" "${APP_DIR}/Contents/Resources"
+mv "${BINARY}" "${APP_DIR}/Contents/MacOS/gm-display"
+chmod +x "${APP_DIR}/Contents/MacOS/gm-display"
+
+# GMDToolsDir tells the app where server.py lives. No server files are copied
+# into the bundle — a copy is exactly how the old app ended up running
+# last month's server.
+TOOLS_XML="$(printf '%s' "${SCRIPT_DIR}" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g')"
+cat > "${APP_DIR}/Contents/Info.plist" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleIdentifier</key>
-    <string>${BUNDLE_ID}</string>
-    <key>CFBundleName</key>
-    <string>${APP_NAME}</string>
-    <key>CFBundleDisplayName</key>
-    <string>${APP_NAME}</string>
-    <key>CFBundleExecutable</key>
-    <string>gm-display</string>
-    <key>CFBundleVersion</key>
-    <string>4.0</string>
-    <key>CFBundleShortVersionString</key>
-    <string>4.0</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>LSUIElement</key>
-    <true/>
+    <key>CFBundleIdentifier</key>         <string>${BUNDLE_ID}</string>
+    <key>CFBundleName</key>               <string>${APP_NAME}</string>
+    <key>CFBundleDisplayName</key>        <string>${APP_NAME}</string>
+    <key>CFBundleExecutable</key>         <string>gm-display</string>
+    <key>CFBundleVersion</key>            <string>5.0</string>
+    <key>CFBundleShortVersionString</key> <string>5.0</string>
+    <key>CFBundlePackageType</key>        <string>APPL</string>
+    <key>LSUIElement</key>                <true/>
+    <key>LSMinimumSystemVersion</key>     <string>11.0</string>
+    <key>GMDToolsDir</key>                <string>${TOOLS_XML}</string>
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>GM Display serves your maps, handouts and notes from your Obsidian vault in Documents.</string>
     <key>CFBundleURLTypes</key>
     <array>
         <dict>
-            <key>CFBundleURLName</key>
-            <string>GM Display Protocol</string>
-            <key>CFBundleURLSchemes</key>
-            <array>
-                <string>gm</string>
-            </array>
+            <key>CFBundleURLName</key>    <string>GM Display Protocol</string>
+            <key>CFBundleURLSchemes</key> <array><string>gm</string></array>
         </dict>
     </array>
 </dict>
 </plist>
 EOF
+plutil -lint "${APP_DIR}/Contents/Info.plist" >/dev/null || { say "✗ Info.plist is invalid"; exit 1; }
 
-    # Copy server files to Resources
-    cp "${SCRIPT_DIR}/gm_display.html" "${APP_DIR}/Contents/Resources/"
-    cp "${SCRIPT_DIR}/server.py" "${APP_DIR}/Contents/Resources/"
+# Ad-hoc signature, so macOS can tell it is the same app from run to run.
+codesign --force --sign - "${APP_DIR}" 2>/dev/null && say "  signed (ad-hoc) ✓"
 
-else
-    # === APPLESCRIPT FALLBACK ===
-    cat > /tmp/gm_display_handler.applescript << 'APPLESCRIPT'
--- GM Display URL handler
--- Sends gm:// URLs to the running server via curl POST.
--- Only starts the server if it's not already running. NEVER kills existing servers.
+# --- 4. gm:// and Login Items -------------------------------------------------
+say "Registering gm:// …"
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "${APP_DIR}" 2>/dev/null
 
-property serverScript : "$HOME/Documents/Pathfinder/.tools/gm-display/server.py"
-
-on run
-    if not isServerRunning() then
-        startServer()
-    end if
-    do shell script "open 'http://localhost:7680'"
-end run
-
-on open location theURL
-    if not isServerRunning() then
-        startServer()
-        delay 2
-    end if
-
-    -- POST the command directly via curl — never spawn a second server.py
-    set jsonPayload to "{\"url\": " & quoted form of theURL & "}"
-    -- Escape for shell: use a temp file to avoid quoting nightmares
-    try
-        do shell script "curl -s -X POST http://localhost:7680/api/command -H 'Content-Type: application/json' -d '{\"url\": \"" & theURL & "\"}' --max-time 2"
-    on error errMsg
-        -- Server might have died between check and POST — try starting it
-        if not isServerRunning() then
-            startServer()
-            delay 2
-            try
-                do shell script "curl -s -X POST http://localhost:7680/api/command -H 'Content-Type: application/json' -d '{\"url\": \"" & theURL & "\"}' --max-time 2"
-            end try
-        end if
-    end try
-end open location
-
-on isServerRunning()
-    try
-        do shell script "curl -s -o /dev/null -w '%{http_code}' --max-time 1 http://localhost:7680/api/health 2>/dev/null | grep -q 200"
-        return true
-    on error
-        return false
-    end try
-end isServerRunning
-
-on startServer()
-    set supportPath to POSIX path of (path to application support from user domain) & "GM Display/"
-    do shell script "mkdir -p " & quoted form of supportPath
-    set logFile to supportPath & "gm-display.log"
-    -- Use the vault copy of server.py (always up to date), find python3 via PATH
-    set pyPath to do shell script "which python3 2>/dev/null || echo /usr/bin/python3"
-    set srvPath to do shell script "echo " & serverScript
-    set cmd to quoted form of pyPath & " " & quoted form of srvPath & " --no-browser >> " & quoted form of logFile & " 2>&1 & echo $!"
-    set newPid to do shell script cmd
-    do shell script "echo " & newPid & " > " & quoted form of (supportPath & "gm-display.pid")
-    repeat 15 times
-        if isServerRunning() then exit repeat
-        delay 0.3
-    end repeat
-end startServer
-APPLESCRIPT
-
-    osacompile -o "${APP_DIR}" /tmp/gm_display_handler.applescript
-    if [ $? -ne 0 ]; then
-        echo "ERROR: osacompile failed"
-        exit 1
-    fi
-
-    # Add URL scheme
-    PLIST="${APP_DIR}/Contents/Info.plist"
-    /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string ${BUNDLE_ID}" "${PLIST}" 2>/dev/null
-    /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes array" "${PLIST}" 2>/dev/null
-    /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0 dict" "${PLIST}"
-    /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleURLName string 'GM Display Protocol'" "${PLIST}"
-    /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes array" "${PLIST}"
-    /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string gm" "${PLIST}"
-
-    # Copy server files
-    cp "${SCRIPT_DIR}/gm_display.html" "${APP_DIR}/Contents/Resources/"
-    cp "${SCRIPT_DIR}/server.py" "${APP_DIR}/Contents/Resources/"
-
-    rm -f /tmp/gm_display_handler.applescript
-    echo "  AppleScript: compiled ✓ (no menu bar icon, but gm:// links work)"
-fi
-
-# --- Register URL scheme ---
-echo ""
-echo "Registering gm:// protocol..."
-/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -R "${APP_DIR}" 2>/dev/null
-
-# --- Add to Login Items ---
+say "Adding to Login Items…"
 osascript -e 'tell application "System Events"
   try
     delete every login item whose name is "GM Display"
   end try
   make login item at end with properties {path:"'"${APP_DIR}"'", hidden:true, name:"GM Display"}
-end tell' 2>/dev/null
+end tell' >/dev/null 2>&1
 
-# --- Launch ---
-echo "Launching..."
+# --- 5. launch -------------------------------------------------------------------
+say "Launching…"
 open -a "${APP_DIR}"
 
-echo ""
-echo "Waiting for server..."
-for i in $(seq 1 30); do
-    if curl -s --max-time 1 http://localhost:7680/api/command > /dev/null 2>&1; then
-        echo "Server: running ✓"
+say "Waiting for the server (macOS may ask whether GM Display can access Documents — say Allow)…"
+for i in $(seq 1 60); do
+    H="$(curl -s --max-time 1 "http://127.0.0.1:${PORT}/api/health" 2>/dev/null)"
+    if printf '%s' "$H" | grep -q '"supervisor": "tray"'; then
+        say "  server: running under the menu-bar app ✓"
+        printf '%s\n' "$H" | python3 -c 'import json,sys; h=json.load(sys.stdin); print("  pid %s · python %s · %s" % (h.get("pid"), h.get("python"), h.get("script","")))' 2>/dev/null
         break
     fi
-    if [ $i -eq 30 ]; then
-        echo "Server didn't start. Check log: cat ~/Library/Application\ Support/GM\ Display/gm-display.log"
+    if [ "$i" -eq 60 ]; then
+        say "  ✗ the server did not come up. Last lines of the log:"
+        tail -15 "$HOME/Library/Logs/gm-display.log" 2>/dev/null
     fi
     sleep 0.5
 done
 
-echo ""
-echo "Done! Built: ${APP_DIR}"
-if $USE_SWIFT; then
-    echo "  ⚔️ should be in your menu bar (top right, near the clock)"
-fi
-echo ""
-echo "=== Quick Guide ==="
-echo "  gm://map/path  -> fog-of-war on projector"
-echo "  gm://show/path -> image on sidecar"
-echo "  P key in fog mode -> keystone + grid controls"
-echo ""
+say ""
+say "Done: ${APP_DIR}"
+say "  ⚔️ is in the menu bar. Restart Server there always runs the code in:"
+say "     ${SCRIPT_DIR}"
+say "  Settings: ${SCRIPT_DIR}/gm-display.conf"
+say "  Log:      ~/Library/Logs/gm-display.log"

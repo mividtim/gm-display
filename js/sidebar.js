@@ -152,7 +152,7 @@ export function attachFogCanvasHandlers() {
   const fogCanvas = document.getElementById('gm-fog-canvas');
   if (!fogCanvas) return;
   fogCanvas.style.cursor = 'crosshair';
-  fogCanvas.onmousedown = (e) => { S.painting = true; paintAt(e); };
+  fogCanvas.onmousedown = (e) => { if (S.fogContext === 'show') return; S.painting = true; paintAt(e); };
   fogCanvas.onmousemove = (e) => { if (S.painting) paintAt(e); };
   fogCanvas.onmouseup = () => { S.painting = false; pushFogHistory(); syncToMapDisplay(); renderPresetThumbnails(); saveState(); };
   fogCanvas.onmouseleave = () => { if (S.painting) { S.painting = false; pushFogHistory(); syncToMapDisplay(); renderPresetThumbnails(); saveState(); } };
@@ -201,8 +201,8 @@ export function renderGMFog() {
   ctx.putImageData(imgData, 0, 0);
 }
 
-export function revealAll() { S.fogMask.fill(255); pushFogHistory(); renderGMFog(); syncToMapDisplay(); renderPresetThumbnails(); saveState(); }
-export function hideAll() { S.fogMask.fill(0); pushFogHistory(); renderGMFog(); syncToMapDisplay(); renderPresetThumbnails(); saveState(); }
+export function revealAll() { if (S.fogContext === 'show' || !S.fogMask) return; S.fogMask.fill(255); pushFogHistory(); renderGMFog(); syncToMapDisplay(); renderPresetThumbnails(); saveState(); }
+export function hideAll() { if (S.fogContext === 'show' || !S.fogMask) return; S.fogMask.fill(0); pushFogHistory(); renderGMFog(); syncToMapDisplay(); renderPresetThumbnails(); saveState(); }
 
 // --- Fog undo/redo ---
 function pushFogHistory() {

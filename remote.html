@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>GM Display — Player</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="stylesheet" href="css/gm-display.css">
 </head>
 <body>
@@ -32,9 +33,15 @@
         <button id="remote-join-btn" class="primary">Ask to join</button>
         <div id="remote-join-status"></div>
       </div>
+      <!-- The GM, on a device other than their own Mac: type the code from the
+           GM page's Displays panel to get GM powers here. -->
+      <div id="remote-gm-row">
+        <button id="remote-gm-login" type="button">GM login</button>
+        <span id="remote-gm-status"></span>
+      </div>
     </div>
   </div>
-  <div id="remote-stage" >
+  <div id="remote-stage" class="map-only">
     <canvas id="remote-canvas"></canvas>
     <canvas id="remote-grid-canvas"></canvas>
     <canvas id="remote-marker-canvas"></canvas>
@@ -43,17 +50,27 @@
   </div>
   <!-- Hover peek at what the party wrote on a hex. Party notes only — the
        GM's prep never reaches this page. -->
-  <div id="remote-note-tip"></div>
-  <div id="remote-note-panel"></div>
-  <div id="remote-legend-panel"></div>
+  <div id="remote-note-tip" class="map-only"></div>
+  <div id="remote-note-panel" class="map-only"></div>
+  <div id="remote-log-panel" class="map-only"></div>
+  <div id="remote-legend-panel" class="map-only"></div>
+  <!-- The campaign's bulletin board: every handout the GM has shared, from
+       every module. Shared by the whole table — one person pans, everyone pans. -->
+  <div id="remote-board"></div>
   <div id="remote-bar" >
+    <span class="remote-tools">
+      <button id="remote-tool-map" class="on" title="The map on the table">🗺 Map</button>
+      <button id="remote-tool-board" title="The campaign's bulletin board — every handout so far">📌 Board<span class="rt-badge"></span></button>
+    </span>
     <span id="remote-color-dot"></span>
     <span id="remote-who"></span>
-    <span id="remote-token-info"></span>
+    <span id="remote-token-info" class="map-only"></span>
+    <span class="board-spacer" style="flex:1;"></span>
     <button id="remote-change-btn">Change</button>
-    <button id="remote-marker-btn">Marker</button>
-    <button id="remote-notes-btn">Notes</button>
-    <button id="remote-legend-btn">Legend</button>
+    <button id="remote-marker-btn" class="map-only">Marker</button>
+    <button id="remote-notes-btn" class="map-only">Notes</button>
+    <button id="remote-log-btn" class="map-only">Log</button>
+    <button id="remote-legend-btn" class="map-only">Legend</button>
   </div>
 </div>
 <script type="module" src="js/remote.js"></script>

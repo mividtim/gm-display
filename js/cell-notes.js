@@ -7,7 +7,7 @@
 // the vault — searchable, linkable, editable in Obsidian. Edits made there flow
 // back here, because the server re-reads any file whose mtime changed.
 import { cellAtMapPx, cellCenterMapPx, cellFromLabel, cellLabel, drawMapGrid, kStepX, kStepY, mapDims, relMapSrc } from './geometry.js';
-import { onPartyNotesChanged, partyNoteCount, partyNotes, partyNotesFor, setPartyNotesMap, startPartyNotesPolling } from './party-notes.js';
+import { onPartyNotesChanged, partyLogHTML, partyNoteCount, partyNotes, partyNotesFor, setPartyNotesMap, startPartyNotesPolling } from './party-notes.js';
 import { S } from './store.js';
 import { isTool, setActiveTool } from './tools.js';
 let selectedCell = null;          // label string, e.g. "5,5"
@@ -93,8 +93,11 @@ export function notesToolChanged() {
   if (b) b.classList.toggle('active', notesMode());
   const st = el('notes-mode-status');
   if (st) st.textContent = notesMode() ? 'ON' : 'OFF';
-  if (!notesMode()) closeNotePop();
-  drawNoteMarkers();          // your pips appear with the tool and go with it
+  // The ring means "this is the cell you are editing". Putting the tool down
+  // is the end of that edit, so the ring goes with it — it used to sit on the
+  // map until something else happened to clear it.
+  if (!notesMode()) { selectedCell = null; closeNotePop(); renderNotesPanel(); }
+  drawNoteMarkers();
   if (notesMode()) loadNotes();
 }
 
@@ -306,14 +309,21 @@ export function notePopOpen() {
 function attachNotePopDismiss() {
   if (document._notePopWired) return;
   document._notePopWired = true;
+  // Dismissing the editor ends the edit too. Only clear the selection when the
+  // Notes tool is NOT up: with it up the sidebar editor is still bound to that
+  // cell, and blanking it because the popover closed would be its own surprise.
+  const dismissed = () => {
+    closeNotePop();
+    if (!notesMode()) { selectedCell = null; renderNotesPanel(); drawNoteMarkers(); }
+  };
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && notePopOpen()) { e.stopPropagation(); closeNotePop(); }
+    if (e.key === 'Escape' && notePopOpen()) { e.stopPropagation(); dismissed(); }
   });
   document.addEventListener('pointerdown', (e) => {
     const pop = el('gm-note-pop');
     if (!pop || pop.style.display !== 'block') return;
     if (pop.contains(e.target)) return;
-    closeNotePop();
+    dismissed();
   }, true);
 }
 
@@ -333,6 +343,16 @@ export function drawNoteMarkers() {
   const ctx = gc.getContext('2d');
   ctx.clearRect(0, 0, w, h);
   const { mw, mh } = mapDims();
+  // A handout gets its own grid switch (default off) and no note pips: notes
+  // are addressed to the MAP's cells, which are not on this image.
+  if (S.fogContext === 'show') {
+    if (S.handoutGridShow) {
+      const was = S.tokenGridShow; S.tokenGridShow = true;
+      drawMapGrid(ctx, (mx, my) => ({ x: mx / mw * w, y: my / mh * h }), mw, mh, S.tokenGridColor);
+      S.tokenGridShow = was;
+    }
+    return;
+  }
   drawMapGrid(ctx, (mx, my) => ({ x: mx / mw * w, y: my / mh * h }), mw, mh, S.tokenGridColor);
   const m2c = (mx, my) => ({ x: mx / mw * w, y: my / mh * h });
   const r = Math.max(4, Math.min(kStepX(mw), kStepY(mw)) / mw * w * 0.16);
@@ -350,14 +370,12 @@ export function drawNoteMarkers() {
     ctx.fill(); ctx.stroke();
   };
   const party = partyNotes();
-  // Your own pips only while you are working with notes. On a realm sheet every
-  // hex carries prep, and 144 gold dots over the art tell you nothing during
-  // play. What the party wrote is always shown: that is news, and there is
-  // never much of it.
-  if (notesMode()) {
-    for (const label of Object.keys(notes)) pip(label, 'rgba(255,203,84,0.92)', party[label] ? -r : 0);
-  }
-  for (const label of Object.keys(party)) pip(label, 'rgba(96,165,250,0.95)', (notesMode() && notes[label]) ? r : 0);
+  // No pip for the GM's own notes, in any mode. On a realm sheet every hex
+  // carries prep, so a dot on every hex marks nothing — it is just 144 dots
+  // over the art. The note is still there on hover and on right-click; the
+  // map does not need to advertise it. What the PARTY wrote does get a pip,
+  // because that is news and there is never much of it.
+  for (const label of Object.keys(party)) pip(label, 'rgba(96,165,250,0.95)', 0);
   if (selectedCell) {
     const cell = cellFromLabel(selectedCell);
     if (cell) {
@@ -378,12 +396,22 @@ export function drawNoteMarkers() {
 function partyBlock(label) {
   const list = partyNotesFor(label);
   if (!list.length) return '';
+  // A hex accumulates notes — the same player may have written three times on
+  // three different visits — so each one is dated. Without that, two entries
+  // from one player read as a contradiction rather than a sequence.
+  const hhmm = (at) => {
+    const m = /\d{4}-\d{2}-\d{2} (\d{2}:\d{2})/.exec(at || '');
+    return m ? m[1] : '';
+  };
   return '<div style="margin-top:10px;border-top:1px solid #333;padding-top:6px;">'
     + '<label>From the party</label>'
     + list.map(e =>
         '<div style="font-size:12px;margin-bottom:4px;">'
-        + '<b style="color:#60a5fa;">' + (e.by || 'a player').replace(/[<>&]/g, '') + '</b> '
-        + '<span style="color:#ccc;">' + (e.text || '').replace(/[<>&]/g, '') + '</span></div>').join('')
+        + '<b style="color:#60a5fa;">' + esc(e.by || 'a player') + '</b> '
+        + (hhmm(e.at)
+            ? '<span style="color:#666;font-variant-numeric:tabular-nums;">'
+              + esc(hhmm(e.at)) + '</span> ' : '')
+        + '<span style="color:#ccc;">' + esc(e.text || '') + '</span></div>').join('')
     + '</div>';
 }
 
@@ -422,6 +450,39 @@ function renderNotesPanel() {
     renderPartyBlock();
   }
   renderNotesList();
+}
+
+// --- the party's log --------------------------------------------------------
+// Same entries as the blue pips on the map, ordered by when they were written.
+// A row jumps to its cell, so reading the log and finding the place on the map
+// are not two separate trips.
+let partyLogOpen = false;
+
+export function togglePartyLog() {
+  partyLogOpen = !partyLogOpen;
+  renderPartyLog();
+}
+
+export function renderPartyLog() {
+  const box = el('party-log');
+  const btn = el('btn-party-log');
+  if (btn) {
+    btn.classList.toggle('active', partyLogOpen);
+    const n = partyNoteCount();
+    btn.textContent = partyLogOpen
+      ? 'Hide party log'
+      : 'Party log (by time)' + (n ? '  ·  ' + n : '');
+  }
+  if (!box) return;
+  box.style.display = partyLogOpen ? 'block' : 'none';
+  if (!partyLogOpen) { box.innerHTML = ''; return; }
+  box.innerHTML = partyLogHTML();
+  box.querySelectorAll('[data-cell]').forEach(tag =>
+    tag.addEventListener('click', () => {
+      const label = tag.dataset.cell;
+      const pt = cellClientPoint(label);
+      if (pt) openNoteAt(label, pt.x, pt.y); else selectCell(label);
+    }));
 }
 
 function renderNotesList() {
@@ -469,7 +530,7 @@ export function initCellNotes() {
   loadNotes(true);
   setPartyNotesMap(currentMap());
   startPartyNotesPolling(4000);
-  onPartyNotesChanged(() => { drawNoteMarkers(); renderPartyBlock(); renderPopParty(); });
+  onPartyNotesChanged(() => { drawNoteMarkers(); renderPartyBlock(); renderPopParty(); renderPartyLog(); });
   // Pick up edits made in Obsidian while the page is open.
   clearInterval(pollTimer);
   pollTimer = setInterval(() => { if (!document.hidden) loadNotes(true); }, 4000);

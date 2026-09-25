@@ -13,7 +13,7 @@ import { computeCropOverlap } from './player-view.js';
 import { sendProjectionSettings, sendShowSettings, updateBgUI, updateRotationUI } from './projection.js';
 import { attachFogCanvasHandlers, fitCanvasToView, renderGMFog, updateUndoRedoButtons } from './sidebar.js';
 import { S } from './store.js';
-import { playerFacingMapSrc } from './tokens.js';
+import { applyGridVisibilityForContext, playerFacingMapSrc } from './tokens.js';
 export function startImageMode(filename) {
   setMainView('image');
   renderGMImage();
@@ -80,7 +80,7 @@ export function startFogMode() {
 
   if (isNewMap) {
     // Save current fog for the previous image (in this context) before switching
-    if (S.lastInitializedFogSrc && S.fogMask && S.lastInitializedFogSrc !== img.src) {
+    if (S.fogContext === 'map' && S.lastInitializedFogSrc && S.fogMask && S.lastInitializedFogSrc !== img.src) {
       // Temporarily restore fogMask/presets back to the previous src so save uses
       // the right key. Easiest: just write under the previous src directly.
       try {
@@ -101,7 +101,9 @@ export function startFogMode() {
     // exploration progresses. A newly-loaded handout starts fully visible
     // because handouts are usually shown whole; the GM applies fog only when
     // they want to mask part of it.
-    const savedFog = loadPerMapFog(img.src, S.mapWidth * S.mapHeight);
+    // Handouts carry no fog at all: they are shown whole, on the sidecar and on
+    // the players' bulletin board alike. Only maps load (and keep) a mask.
+    const savedFog = S.fogContext === 'show' ? null : loadPerMapFog(img.src, S.mapWidth * S.mapHeight);
     if (savedFog) {
       S.fogMask = savedFog;
     } else {
@@ -172,6 +174,9 @@ export function startFogMode() {
   // Scale canvas display size to fit the available main-view area.
   fitCanvasToView();
 
+  // Grid lines are remembered per image. A handout's default is OFF — a grid
+  // calibrated for a map means nothing drawn over a letter.
+  applyGridVisibilityForContext();
   // Always (re)attach fog painting handlers when entering fog mode — defensive
   // against any case where the canvas previously lost them.
   attachFogCanvasHandlers();
@@ -182,7 +187,7 @@ export function startFogMode() {
   renderPresetThumbnails();
   updateFogTargetButtons();
   setStatus(S.fogContext === 'show'
-    ? 'Editing fog on sidecar handout. R/H = reveal/hide, C = crop. Esc to exit.'
+    ? 'Handout on the sidecar. C = crop. Share it to the board from its library card.'
     : 'Fog of War -> Projector. R/H = reveal/hide, C = crop, P = projection/grid');
   saveState();
 }

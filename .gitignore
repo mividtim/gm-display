@@ -12,5 +12,21 @@ __pycache__/
 # Build artifacts
 /tmp/
 
+# The app itself has no build step and loads no packages. These are for
+# the dev tools and the tests only (acorn for the codemods, jsdom for
+# tests/party-log.mjs), so they are installed, not committed.
+node_modules/
+
 # Artwork uploaded through the in-app "Upload…" control
 /uploads/
+
+# Scratch bucket: this environment cannot delete files, only move them here
+_to_delete/
+
+# Output of "Install GM Display.command"
+build_app.log
+
+# The GM code for the player page, and the key its cookie is signed with
+.gm-secret.json
+# Output of "Install GM Display.command"
+build_app.log

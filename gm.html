@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>GM Display</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="stylesheet" href="css/gm-display.css">
 </head>
 <body>
@@ -56,6 +57,15 @@
           <div class="status" id="show-status" style="text-align:center;font-size:10px;margin-top:4px;"><span class="status-off">not connected</span></div>
         </div>
       </div>
+      <!-- What the players see, without making a token to see it with. -->
+      <button data-act="player-preview" class="btn" style="width:100%;font-size:11px;padding:6px;margin-top:8px;"
+              title="Open the player page as a player would see it — hidden tokens, GM legend groups and un-shared handouts are left out">👁 Preview player view</button>
+      <!-- GM powers on the player page from any other device. -->
+      <div style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:11px;color:#999;">
+        <span title="Type this into “GM login” on the player page, on a tablet or through the tunnel">GM code:</span>
+        <code id="gm-code" style="background:#222;padding:2px 6px;border-radius:3px;color:#ffe6a8;letter-spacing:1px;user-select:all;">…</code>
+        <button data-act="gm-code-new" title="Make a new code (logs every other GM browser out)" style="padding:1px 6px;font-size:11px;">↻</button>
+      </div>
       <!-- Per-display thumbnails removed: live state is now indicated by the
            PROJ/SIDE badge color on each Library card (saturated when live on
            that display, dimmed otherwise). Legacy thumb DOM kept hidden so
@@ -75,10 +85,10 @@
     <summary>Library</summary>
     <div class="sb-body">
       <div class="drop-zone" id="drop-zone" style="width:100%;height:60px;font-size:11px;margin-bottom:8px;">
-        <span>Drop image here</span>
-        <small>or click to browse</small>
+        <span>Drop images here</span>
+        <small>any number · or click to browse</small>
       </div>
-      <input type="file" id="file-input" accept="image/*" style="display:none">
+      <input type="file" id="file-input" accept="image/png,image/jpeg,image/webp,image/gif" multiple style="display:none">
 
       <!-- Add artwork: pick from vault or upload a file, choosing map vs image -->
       <div style="border:1px solid #333;border-radius:4px;padding:6px;margin-bottom:8px;">
@@ -91,12 +101,12 @@
         </div>
         <div style="display:flex;gap:4px;align-items:center;">
           <select id="art-type" title="Where this artwork displays" style="flex:1;background:#222;color:#eee;border:1px solid #444;border-radius:3px;padding:4px;font-size:11px;">
-            <option value="map">Map → Projector</option>
             <option value="image">Image → Sidecar</option>
+            <option value="map">Map → Projector</option>
           </select>
           <button data-act="b9" class="primary" style="background:#6a4;border-color:#8c6;color:#fff;">+ Add</button>
           <button data-act="b10" title="Upload an image file into the vault">Upload…</button>
-          <input type="file" id="art-file-input" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none">
+          <input type="file" id="art-file-input" accept="image/png,image/jpeg,image/webp,image/gif" multiple style="display:none">
         </div>
       </div>
 
@@ -110,6 +120,31 @@
       <!-- Legacy containers retained for backward-compat with anything still referencing them; kept hidden. -->
       <div id="map-library" style="display:none;"><div id="map-library-list"></div></div>
       <div id="image-library" style="display:none;"><div id="image-library-list"></div></div>
+    </div>
+  </details>
+
+  <!-- The campaign's bulletin board. Handouts belong to modules; the board
+       belongs to the campaign, so everything shared from any module ends up
+       on the one board the players work together. -->
+  <details class="sb-section" id="section-board" open>
+    <summary>Bulletin Board</summary>
+    <div class="sb-body">
+      <div style="font-size:11px;color:#888;margin-bottom:6px;">
+        The players' shared corkboard for this <b>campaign</b>. Clicking a handout
+        only shows it to you — 📌 on its card (or the button over it) pins it
+        to the board for everyone.
+      </div>
+      <button id="btn-open-board" class="btn" style="width:100%;font-size:12px;padding:6px;">📌 Open the board</button>
+      <div style="display:flex;gap:6px;align-items:center;margin-top:8px;">
+        <label style="font-size:11px;color:#aaa;margin:0;">Yarn</label>
+        <input type="color" id="board-yarn-color" value="#c0392b" title="One yarn colour for the whole campaign"
+               style="width:34px;height:26px;border:1px solid #555;background:#222;cursor:pointer;padding:0;">
+        <label style="font-size:11px;color:#aaa;margin:0 0 0 6px;">Notes as</label>
+        <input type="text" id="board-gm-name" value="The Handler" title="How your notes are signed on the board"
+               style="flex:1;min-width:0;background:#222;color:#eee;border:1px solid #444;border-radius:3px;padding:3px 5px;font-size:11px;">
+      </div>
+      <label style="margin-top:8px;">Shared: <span class="val" id="board-status">—</span></label>
+      <div id="board-shared-list"></div>
     </div>
   </details>
 
@@ -457,6 +492,11 @@
       <div id="note-editor"></div>
       <label style="margin-top:10px;">On this map</label>
       <div id="note-list" style="max-height:220px;overflow:auto;"></div>
+      <!-- The same party notes the map already shows, read as a log: down the
+           page in the order they were written, rather than across the map by
+           cell. The question you ask after the session, not during it. -->
+      <button id="btn-party-log" style="width:100%;margin-top:10px;">Party log (by time)</button>
+      <div id="party-log" class="party-log" style="display:none;"></div>
     </div>
   </details>
 
@@ -528,8 +568,33 @@
         <button data-act="b65" title="Add this NPC to the current map">+ To map</button>
       </div>
 
+      <!-- Setting an ambush is one gesture, not eight. Hide the room, place
+           everyone while the table sees an empty map, then reveal them one at
+           a time from the list as the rolls come in. -->
+      <div style="display:flex;gap:4px;margin-bottom:6px;">
+        <button data-act="npc-hide-all" style="flex:1;border-color:#6a4a8a;color:#d8c8ff;"
+                title="Hide every NPC on this map. They stay on your screen, faded, and you can still place and move them.">○ Hide all NPCs</button>
+        <button data-act="npc-show-all" style="flex:1;border-color:#4a7a4a;color:#cfc;"
+                title="Reveal every NPC on this map to the table at once.">◉ Reveal all</button>
+      </div>
+
+      <!-- A map can arrive with people already on it. Prepped in Obsidian at
+           Map Notes/<map>.tokens.json, or saved out of this panel. -->
+      <div style="display:flex;gap:4px;margin-bottom:6px;">
+        <button data-act="enc-save" style="flex:1;"
+                title="Write the tokens now on this map to your vault as its encounter, so this setup can be edited in Obsidian and run again">⤓ Save encounter</button>
+        <button data-act="enc-reload" style="flex:1;"
+                title="Re-seed from the vault's encounter file, discarding the tokens it placed here before. What you want after editing the JSON, or to reset a fight.">↻ Reload</button>
+      </div>
+
       <!-- Token list (tokens on the current map) -->
       <div id="token-list" style="display:flex;flex-direction:column;gap:3px;max-height:240px;overflow:auto;margin-bottom:8px;"></div>
+      <div style="font-size:10px;color:#888;margin:-4px 0 8px;">
+        ◉ / ○ on a row shows or hides that token for the table. A hidden token
+        still draws here, faded and dash-ringed — drag it, duplicate it, walk it
+        across the map; the projector and the players' page are never told it
+        exists.
+      </div>
 
       <!-- A token has to mark its cell without hiding what is drawn in it. -->
       <label>Token fill: <span class="val" id="tok-opacity-val">62%</span></label>
@@ -581,6 +646,8 @@
     <!-- What a click or drag on the map does. One tool at a time; this is the
          only place that answers that question. -->
     <div id="tool-bar"></div>
+    <!-- Over an open handout: the explicit click that shares it. -->
+    <button id="handout-share-float">📌 Share with players</button>
     <div id="gm-canvas-container">
       <div id="gm-canvas-wrap">
         <canvas id="gm-map-canvas"></canvas>
@@ -605,6 +672,11 @@
        wrap's clipping and can sit over the sidebar if the map is wide. -->
   <div id="gm-note-tip"></div>
   <div id="gm-note-pop"></div>
+
+  <!-- The campaign bulletin board, worked by the GM exactly as a player would. -->
+  <div id="view-board" class="main-view">
+    <div id="gm-board"></div>
+  </div>
 
   <div id="view-image" class="main-view">
     <!-- WYSIWYG sidecar mirror: shows the same cropped + rotated content the

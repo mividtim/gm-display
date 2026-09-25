@@ -1,9 +1,9 @@
 // GM Display — tokens.js
 // The GM side: token roster, per-map placement, rendering, controls.
 import { drawNoteMarkers, initCellNotes, notesOnMapChanged, notesToolChanged } from './cell-notes.js';
+import { forceSyncToMapDisplay } from './fog-presets.js';
 import { rlEncode } from './games.js';
 import { TOKEN_SIDES, cellAtMapPx, cellLabel, clamp01, isFlatHex, isHexKey, isParty, kCellH, kCellW, kRegularStepY, kStepY, kTokenDiam, mapDims, relMapSrc, snapNorm, tokenClass, tokenDisplayName, tokenFrac, uid } from './geometry.js';
-import { forceSyncToMapDisplay } from './fog-presets.js';
 import { setStatus } from './keyboard.js';
 import { initLegendGM, legendOnMapChanged } from './legend.js';
 import { ensureMarkerLoop } from './markers.js';
@@ -87,9 +87,17 @@ function applySavedMapKey(src) {
     S.keyOx = +k.ox || 0;
     S.keyOy = +k.oy || 0;
     S.keyLinkXY = k.link !== false;
+    // A key written by the grid toggle alone carries no calibration. The map
+    // may still ship one in the vault, so adopt it exactly as if this browser
+    // had never opened the map — but leave the grid's on/off alone, because
+    // that much the GM has now said out loud.
+    if (!S.keyCellPx) applyShippedMapKey(src, true);
   } else {
     // Never calibrated here. A map may still ship a calibration beside its
     // notes in the vault — fetch it, so a prepared map arrives ready to use.
+    // Lines default to ON for a map nobody has decided about yet, rather than
+    // inheriting whatever the previous map happened to be showing.
+    S.tokenGridShow = true;
     S.keyCellPx = 0; S.keyCellYPx = 0; S.keyOx = 0; S.keyOy = 0; S.keyLinkXY = true;
     applyShippedMapKey(src);
   }
@@ -99,7 +107,7 @@ function applySavedMapKey(src) {
 // A calibration shipped with the map, at Map Notes/<map>.key.json in the vault.
 // Only consulted when this browser has never calibrated the map itself, so a
 // local adjustment always wins.
-async function applyShippedMapKey(src) {
+async function applyShippedMapKey(src, keepLocalDisplay) {
   if (!src) return;
   try {
     const r = await fetch('/api/mapkey?map=' + encodeURIComponent(relMapSrc(src || '')));
@@ -107,8 +115,10 @@ async function applyShippedMapKey(src) {
     const k = d && d.key;
     if (!k || relMapSrc(S.lastMapSrc || '') !== relMapSrc(src || '')) return;
     if (k.shape) setKeyShape(k.shape);
-    if (typeof k.enabled === 'boolean') S.tokenGridEnabled = k.enabled;
-    if (typeof k.show === 'boolean') S.tokenGridShow = k.show;
+    if (!keepLocalDisplay) {
+      if (typeof k.enabled === 'boolean') S.tokenGridEnabled = k.enabled;
+      if (typeof k.show === 'boolean') S.tokenGridShow = k.show;
+    }
     S.keyCellPx  = +k.cell  || 0;
     S.keyCellYPx = +k.cellY || 0;
     S.keyOx = +k.ox || 0;
@@ -118,6 +128,150 @@ async function applyShippedMapKey(src) {
     keyChanged();
     setStatus('Grid calibration loaded from the vault');
   } catch (e) { /* no server, or no shipped key — the sliders still work */ }
+}
+
+// === Shipped encounters ============================================
+// A map can arrive with people already standing on it, the same way it can
+// arrive calibrated: Map Notes/<map>.tokens.json, written in Obsidian during
+// prep or saved out of the sidebar after building a setup by hand.
+//
+// Seeded once per map per browser. The flag is what makes that safe — without
+// it, every reopen would walk four K'n-yani back to their starting hexes
+// mid-fight, or pile in a second set of them.
+function encounterSeededKey(src) { return campaignKey('enc-seeded:' + relMapSrc(src || '')); }
+
+// Ask the server what is prepped for this map.
+//
+// The three ways this comes back empty are NOT the same thing, and collapsing
+// them into one silent `return` is how an encounter that is sitting right there
+// on disk turns into "the tokens just didn't appear":
+//
+//   no file          — the normal case for most maps. Say nothing.
+//   file, no tokens  — it is there and could not be read. That is a typo in
+//                      the JSON, and the GM is the only one who can fix it.
+//   endpoint missing — the running server predates this feature. Almost always
+//                      launchd still holding the old process; a page reload
+//                      will never fix it, so say so plainly.
+async function fetchEncounter(rel) {
+  let r;
+  try {
+    r = await fetch('/api/encounter?map=' + encodeURIComponent(rel));
+  } catch (e) {
+    return { problem: 'The server is not answering — is it running?' };
+  }
+  if (r.status === 404) {
+    return { problem: 'This server has no /api/encounter — it is running an '
+      + 'older copy of GM Display. Restart it: launchctl kickstart -k '
+      + 'gui/$(id -u)/com.gm-display.server' };
+  }
+  if (!r.ok) return { problem: 'The server refused the encounter request (' + r.status + ')' };
+  let d;
+  try { d = await r.json(); } catch (e) {
+    return { problem: 'The server sent something that was not an encounter — '
+      + 'it is probably running an older copy. Restart it.' };
+  }
+  const enc = d && d.encounter;
+  if (!enc || !enc.tokens || !enc.tokens.length) {
+    // A file that exists but yielded nothing is a broken file, not an absence.
+    if (d && d.file) {
+      return { problem: 'Could not read ' + decodeURIComponent(String(d.file).split('/').pop())
+        + ' — check the JSON.' };
+    }
+    return {};                            // nothing prepped here; that is fine
+  }
+  return { enc };
+}
+
+export async function applyShippedEncounter(src) {
+  if (S.isPlayerView || S.isRemoteView || !src) return;
+  const rel = relMapSrc(src);
+  let flag = '';
+  try { flag = localStorage.getItem(encounterSeededKey(rel)) || ''; } catch (e) {}
+  if (flag) return;                       // already seeded here; leave it alone
+  const { enc, problem } = await fetchEncounter(rel);
+  if (problem) { setStatus(problem); return; }
+  if (!enc) return;
+  // The GM may have moved on while that was in flight.
+  if (relMapSrc(S.lastMapSrc || '') !== rel) return;
+
+  let added = 0;
+  enc.tokens.forEach(d => {
+    // The id comes from the file and is stable, so a second machine opening
+    // the same map recognises the same K'n-yan rather than making a new one.
+    if (S.roster.some(t => t.id === d.id)) return;
+    const t = {
+      id: d.id, base: d.base, num: d.num || 0, color: d.color, img: d.img || '',
+      side: d.side, owner: '', ownerColor: '', pending: null,
+      tx: clamp01(d.tx), ty: clamp01(d.ty), onMap: !!d.onMap,
+    };
+    const s = snapNorm(t.tx, t.ty);       // land on a cell, not between two
+    t.tx = s.tx; t.ty = s.ty;
+    S.roster.push(t);
+    if (!S.tokens.includes(t)) S.tokens.push(t);
+    added++;
+  });
+  try { localStorage.setItem(encounterSeededKey(rel), '1'); } catch (e) {}
+  if (!added) return;
+  onTokensChanged();
+  const hidden = enc.tokens.filter(t => !t.onMap).length;
+  setStatus((enc.name || 'Encounter') + ' loaded — ' + added + ' token'
+    + (added === 1 ? '' : 's')
+    + (hidden ? ', ' + hidden + ' hidden from the table' : ''));
+}
+
+// Write the tokens now on this map back to the vault as its encounter, so a
+// setup arranged by dragging can be kept, edited in Obsidian, and re-run.
+export async function saveEncounterToVault() {
+  if (!S.lastMapSrc) { setStatus('Open a map first'); return; }
+  if (!S.tokens.length) { setStatus('No tokens on this map to save'); return; }
+  const rel = relMapSrc(S.lastMapSrc);
+  const name = decodeURIComponent(rel.split('/').pop()).replace(/\.[a-z0-9]+$/i, '');
+  try {
+    const r = await fetch('/api/encounter', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        map: rel, name,
+        tokens: S.tokens.map(t => ({
+          id: t.id, base: t.base, num: t.num || 0, side: t.side,
+          color: t.color, img: t.img || '',
+          tx: t.tx, ty: t.ty, onMap: !!t.onMap,
+        })),
+      }),
+    });
+    const d = await r.json();
+    if (!r.ok) { setStatus(d.error || 'Could not save the encounter'); return; }
+    setStatus('Encounter saved to your vault — ' + d.count + ' tokens');
+  } catch (e) {
+    setStatus('Not saved — is the server running?');
+  }
+}
+
+// Seed it again: forget that this map was already set up here, so the file on
+// disk wins. What you want after editing the JSON, or to reset a fight to its
+// opening positions.
+export async function reloadEncounterFromVault() {
+  if (!S.lastMapSrc) { setStatus('Open a map first'); return; }
+  const rel = relMapSrc(S.lastMapSrc);
+  const { enc, problem } = await fetchEncounter(rel);
+  if (problem) { setStatus(problem); return; }
+  if (!enc) {
+    setStatus('No encounter prepped for this map. “Save encounter” writes one.');
+    return;
+  }
+  // Whatever the file is about to re-create has to go first, or it finds its
+  // own ids already in the roster and adds nothing. Ask before discarding —
+  // this throws away where things have moved to.
+  const ids = new Set(enc.tokens.map(t => t.id));
+  const doomed = S.roster.filter(t => ids.has(t.id) || String(t.id || '').startsWith('enc-'));
+  if (doomed.length && !confirm(
+      `Reset ${doomed.length} token${doomed.length === 1 ? '' : 's'} to the positions in `
+      + `“${enc.name || 'the encounter file'}”? Where they have moved to will be lost.`)) return;
+  const gone = new Set(doomed.map(t => t.id));
+  S.roster = S.roster.filter(t => !gone.has(t.id));
+  S.tokens = S.tokens.filter(t => !gone.has(t.id));
+  try { localStorage.removeItem(encounterSeededKey(rel)); } catch (e) {}
+  await applyShippedEncounter(S.lastMapSrc);
+  onTokensChanged();
 }
 
 // === Per-map token storage =========================================
@@ -221,6 +375,10 @@ export function setTokenMap(src) {
   broadcastTokens();
   pushTokensToServer();
   saveTokens();
+  // ...and whoever was prepped to be standing here. Last, and only the first
+  // time this browser opens the map, so it seeds an empty board rather than
+  // overwriting a fight in progress.
+  applyShippedEncounter(src);
 }
 
 export function initTokensGM() {
@@ -240,6 +398,7 @@ export function initTokensGM() {
   refreshTokenImageOptions();
   applySavedMapKey(S.lastMapSrc);
   resolvePlayerMap(S.lastMapSrc);     // a restored session may reopen a split map
+  applyShippedEncounter(S.lastMapSrc); // ...and may be opening it for the first time
   startPendingPolling(3000);          // watch the door
   initCellNotes();
   initLegendGM();
@@ -370,12 +529,39 @@ function deleteToken(id) {
   onTokensChanged();
 }
 
-function onTokensChanged() {
+export function onTokensChanged() {
   renderTokenList();
   renderGMTokens();
   broadcastTokens();
   pushTokensToServer();
   saveTokens();
+}
+
+// --- revealing a room full of things at once -------------------------------
+// Setting an ambush is one gesture, not eight: hide every NPC on the map,
+// place them while the table sees nothing, then reveal them one at a time from
+// the list as the Alertness rolls come in. PCs are left alone — hiding a
+// player's own piece is a different decision, and it is per-token.
+export function setAllNpcVisibility(on) {
+  const hits = S.tokens.filter(t => t.side === 'npc' && !!t.onMap !== on);
+  if (!hits.length) {
+    setStatus(on ? 'Every NPC here is already showing' : 'No NPCs on this map are showing');
+    return;
+  }
+  hits.forEach(t => { t.onMap = on; });
+  onTokensChanged();
+  setStatus(hits.length + (hits.length === 1 ? ' NPC ' : ' NPCs ')
+    + (on ? 'revealed' : 'hidden — still yours to move'));
+}
+export function hideAllNpcs() { setAllNpcVisibility(false); }
+export function revealAllNpcs() { setAllNpcVisibility(true); }
+
+// Flip one token's visibility, from wherever the GM happens to be standing.
+export function setTokenVisible(id, on) {
+  const t = S.tokens.find(x => x.id === id);
+  if (!t || !!t.onMap === !!on) return false;
+  t.onMap = !!on;
+  return true;
 }
 
 // approve / reject a proposed move
@@ -803,12 +989,27 @@ export function updateSplitUI() {
 // working either way — a map with its own printed grid still needs to be
 // calibrated to it, it just does not need ours painted on top.
 export function toggleTokenGrid() {
+  // On a handout the toggle is that handout's own, remembered per image and
+  // off unless the GM has turned it on for this one.
+  if (S.fogContext === 'show' && S.currentMode === 'fog') {
+    S.handoutGridShow = !S.handoutGridShow;
+    saveHandoutGrid(S.lastShowSrc, S.handoutGridShow);
+    syncGridToggleUI();
+    drawNoteMarkers();
+    return;
+  }
   S.tokenGridShow = !S.tokenGridShow;
   const st = document.getElementById('tokgrid-status');
   if (st) st.textContent = S.tokenGridShow ? 'ON' : 'OFF';
   const b = document.getElementById('btn-tokgrid');
   if (b) b.classList.toggle('active', S.tokenGridShow);
-  renderGMTokens(); broadcastTokens(); pushTokensToServer(); saveTokens();
+  renderGMTokens(); broadcastTokens(); pushTokensToServer();
+  // Both places, and the map key especially: a page load restores the
+  // campaign roster and then applies the map key over the top, so saving only
+  // the roster meant the map key's stale `show` won every refresh and the
+  // grid came back. Whether to draw our grid is a property of the MAP anyway
+  // — one map has a grid printed on it, the next does not.
+  saveTokens(); saveMapKey(S.lastMapSrc);
 }
 function setTokenGridCells(v) {
   S.tokenGridCells = Math.max(4, Math.min(80, parseInt(v) || 24));
@@ -902,7 +1103,43 @@ export function resetMapKey() {
   keyChanged();
 }
 // Push the current key values back into the panel controls.
+// === Grid lines on handouts ===========================================
+// A handout is not a map: the grid calibration belongs to whichever map is up,
+// and painting it over a letter or a portrait is noise. So a handout's lines
+// are its own switch, remembered per image, and OFF until the GM says so.
+S.handoutGridShow = false;
+function handoutGridKey(src) { return gameKey('handout-grid:' + relMapSrc(src || '')); }
+export function loadHandoutGrid(src) {
+  if (!src) return false;
+  try { return localStorage.getItem(handoutGridKey(src)) === 'on'; } catch (e) { return false; }
+}
+function saveHandoutGrid(src, on) {
+  if (!src || S.isPlayerView || S.isRemoteView) return;
+  try {
+    if (on) localStorage.setItem(handoutGridKey(src), 'on');
+    else localStorage.removeItem(handoutGridKey(src));
+  } catch (e) {}
+}
+// Is a grid being DRAWN on what the GM is looking at right now?
+export function gridLinesShown() {
+  return (S.fogContext === 'show') ? !!S.handoutGridShow : !!S.tokenGridShow;
+}
+export function syncGridToggleUI() {
+  const on = gridLinesShown();
+  const st = document.getElementById('tokgrid-status');
+  if (st) st.textContent = on ? 'ON' : 'OFF';
+  const b = document.getElementById('btn-tokgrid');
+  if (b) b.classList.toggle('active', on);
+}
+// Called whenever the GM view switches between a map and a handout.
+export function applyGridVisibilityForContext() {
+  if (S.fogContext === 'show') S.handoutGridShow = loadHandoutGrid(S.lastShowSrc);
+  syncGridToggleUI();
+  drawNoteMarkers();
+}
+
 function syncKeyPanel() {
+  syncGridToggleUI();
   const mw = S.mapWidth || 1000;
   const cw = kCellW(mw), ch = kCellH(mw);
   const set = (id, v) => { const el = document.getElementById(id); if (el && el.value != v) el.value = v; };
@@ -984,8 +1221,13 @@ export function renderGMTokens() {
   // fog on a sidecar handout (fogContext 'show') — that's the image display.
   if (S.currentMode !== 'fog' || S.fogContext !== 'map') return;
   const unit = (kTokenDiam(S.mapWidth) / (S.mapWidth || 1)) * 100;
-  // Draw only tokens the GM has made visible on this map (onMap is per-map).
-  S.tokens.filter(t => t.onMap).forEach(t => {
+  // Every token on this map is drawn HERE, revealed or not. A hidden one comes
+  // through faded and dash-ringed (see `.token.unseen`) so it reads as "on the
+  // board, not on the table" — which is the only way to place four invisible
+  // K'n-yani and then walk them around while the players watch an empty map.
+  // The projector and the player page still draw only what `onMap` allows, and
+  // the server no longer even sends them the rest.
+  S.tokens.forEach(t => {
     const sizePct = unit * tokenFrac(t);
     // base token (solid) at its committed position
     layer.appendChild(makeTokenEl(t, t.tx, t.ty, sizePct, false, true));
@@ -1007,7 +1249,10 @@ export function renderGMTokens() {
 }
 function makeTokenEl(t, tx, ty, sizePct, isGhost, draggable) {
   const el = document.createElement('div');
-  el.className = 'token ' + tokenClass(t) + (isGhost ? ' ghost' : '') + (draggable ? ' draggable' : '');
+  el.className = 'token ' + tokenClass(t) + (isGhost ? ' ghost' : '')
+    + (draggable ? ' draggable' : '') + (t.onMap ? '' : ' unseen');
+  el.title = t.onMap ? tokenDisplayName(t)
+    : tokenDisplayName(t) + ' — hidden. Only you can see this.';
   el.style.left = (tx * 100) + '%';
   el.style.top = (ty * 100) + '%';
   el.style.width = sizePct + '%';
@@ -1176,6 +1421,26 @@ export function applyPlayerAction(a) {
     t.pending = { tx: s.tx, ty: s.ty, by: a.player };
     return true;
   }
+  // --- the GM, from a surface that is not this page --------------------------
+  // The projector window and the player page can both be driven by the GM
+  // standing at the table. Those moves are not proposals: they commit, exactly
+  // as a drag on this page does.
+  //
+  // `a.local` is stamped by the server from the socket the request arrived on
+  // (see /api/action), or set directly by the projector, which can only reach
+  // us over a same-origin BroadcastChannel. It is never something the sender
+  // chose, so a remote player posting kind:'gmmove' gets nowhere.
+  if (a.kind === 'gmmove') {
+    if (!a.local) return false;
+    const s = snapNorm(a.tx, a.ty);
+    t.tx = s.tx; t.ty = s.ty;
+    t.pending = null;                  // the GM's own hand outranks a proposal
+    return true;
+  }
+  if (a.kind === 'gmvis') {
+    if (!a.local) return false;
+    return setTokenVisible(t.id, a.onMap);
+  }
   return false;
 }
 
@@ -1287,4 +1552,14 @@ export function loadTokens() {
   } catch (e) { console.warn('load tokens failed', e); }
   hydrateTokensForMap(S.lastMapSrc);
   S.tokensReady = true;
+  // The map key belongs to the MAP, so adopting a game's token state has to
+  // adopt its calibration too. Switching games used to skip this entirely:
+  // switchGame() clears tokensReady, restoreState() then loads the map while
+  // setTokenMap() is still short-circuiting on !tokensReady, so the only two
+  // callers of applySavedMapKey both missed. The previous game's cell size and
+  // origin stayed live over the new game's map — and the next keyChanged()
+  // wrote them into that map's saved key, so the damage outlived the session.
+  // One game's grid bleeding onto another's map is exactly what that looked
+  // like from the table.
+  applySavedMapKey(S.lastMapSrc);
 }

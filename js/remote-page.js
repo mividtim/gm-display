@@ -4,8 +4,9 @@ import { rlDecode } from './games.js';
 import { REMOTE_COLORS, TOKEN_FRAC, cellAtMapPx, cellCenterMapPx, cellFromLabel, cellLabel, clamp01, drawMapGrid, isParty, kTokenDiam, snapNorm, tokenClass, tokenDisplayName, tokenFrac, uid } from './geometry.js';
 import { legendCount, legendHTML, onLegendChanged, setLegendMap, startLegendPolling } from './legend.js';
 import { drawAllMarkers, ensureMarkerLoop } from './markers.js';
-import { onPartyNotesChanged, partyNotes, partyNotesFor, savePartyNote, setPartyNotesMap, startPartyNotesPolling } from './party-notes.js';
+import { addPartyNote, editPartyNote, onPartyNotesChanged, partyLogHTML, partyNotes, partyNotesFor, removePartyNote, setPartyNotesMap, startPartyNotesPolling } from './party-notes.js';
 import { slugify } from './state.js';
+import { boardDoc, mountBoard, onBoard, startBoardSync } from './board.js';
 import { S } from './store.js';
 import { applyGridWire, initialsOf, tokenFillOpacity } from './tokens.js';
 // ===================================================================
@@ -28,13 +29,18 @@ export function setupRemoteView() {
   attachRemoteNoteHandler();
   attachRemoteHover();
   attachJoinHandlers();
+  if (S.previewMode) { enterPreview(); }
   // A refresh while waiting should still be waiting, not back at square one.
   if (localStorage.getItem(JOIN_ID_KEY)) { showWaiting(''); startJoinPolling(); }
   startPartyNotesPolling(4000);
-  onPartyNotesChanged(() => { drawRemoteNotePips(); renderRemoteNotePanel(); });
+  onPartyNotesChanged(() => { drawRemoteNotePips(); renderRemoteNotePanel(); renderRemoteLog(); });
   startLegendPolling(6000);
   onLegendChanged(() => renderRemoteLegend());
   window.addEventListener('resize', () => { if (S.remoteScreen === 'play') remoteRelayout(); });
+  // The bulletin board syncs from the start, so the Board button can say
+  // "something new was pinned" while the player is still on the map.
+  startBoardSync();
+  onBoard(updateBoardBadge);
   // Poll from the start so the roster fills in (and stays current) on the
   // selection screen, then keeps the map live once a character is chosen.
   setInterval(remoteSyncTick, 300);
@@ -219,6 +225,108 @@ function enterPlayWith(t, name, color) {
   const dot = document.getElementById('remote-color-dot'); if (dot) dot.style.background = color;
   // Render after the stage is laid out so the canvas has real dimensions.
   requestAnimationFrame(() => { renderRemoteFrame(); renderRemoteTokens(); });
+  setRemoteTool(savedTool());
+}
+
+// The GM's way onto the play screen: no name, no claim, no proposal queue.
+// Everything they drag here commits, because the server already established
+// that this request came from the machine the roster lives on.
+function enterAsGM() {
+  S.myActorName = 'GM';
+  S.myActorId = 'gm-remote';
+  S.remoteClaimId = null;
+  S.remoteScreen = 'play';
+  document.getElementById('remote-select').style.display = 'none';
+  document.getElementById('remote-stage').style.display = 'flex';
+  document.getElementById('remote-bar').style.display = 'flex';
+  document.getElementById('remote-who').textContent = 'GM';
+  const dot = document.getElementById('remote-color-dot');
+  if (dot) dot.style.background = S.markerColor || '#ffcf5c';
+  requestAnimationFrame(() => { renderRemoteFrame(); renderRemoteTokens(); });
+  setRemoteTool(savedTool());
+}
+
+// --- Map | Board ------------------------------------------------------------
+// The map is one tool among several now. The other is the campaign's bulletin
+// board: every handout the GM has shared, from any module, pinned on one
+// corkboard that the whole table works together.
+let board = null;
+const TOOL_KEY = 'gm-display:remote:tool';
+const SEEN_KEY = 'gm-display:remote:board-seen';
+function savedTool() { try { return localStorage.getItem(TOOL_KEY) === 'board' ? 'board' : 'map'; } catch (e) { return 'map'; } }
+
+function claimedCharacter() {
+  const t = S.tokens.find(x => x.id === S.remoteClaimId);
+  return t ? tokenDisplayName(t) : '';
+}
+
+export function setRemoteTool(tool) {
+  const onBoardTool = tool === 'board';
+  try { localStorage.setItem(TOOL_KEY, onBoardTool ? 'board' : 'map'); } catch (e) {}
+  const rv = document.getElementById('remote-view');
+  if (rv) rv.classList.toggle('board-mode', onBoardTool);
+  const bm = document.getElementById('remote-tool-map'), bb = document.getElementById('remote-tool-board');
+  if (bm) bm.classList.toggle('on', !onBoardTool);
+  if (bb) bb.classList.toggle('on', onBoardTool);
+  const host = document.getElementById('remote-board');
+  if (onBoardTool) {
+    // Map-only modes would otherwise still be armed when the player comes back.
+    if (S.remoteMarkerMode) remoteToggleMarker();
+    if (remoteNotesMode) remoteToggleNotes();
+    if (!board) {
+      board = mountBoard(host, {
+        identity: () => (remoteIsGM() && !S.remoteClaimId)
+          ? { name: 'GM', character: '', gm: true }
+          : { name: S.myActorName || 'a player', character: claimedCharacter(), gm: false },
+        colorFor: playerColor,
+      });
+    }
+    host.style.display = 'block';
+    board.show();
+    markBoardSeen();
+  } else {
+    if (board) board.hide();
+    if (host) host.style.display = 'none';
+    if (S.remoteScreen === 'play') requestAnimationFrame(() => remoteRelayout());
+  }
+  updateBoardBadge();
+}
+
+function sharedIds() { const d = boardDoc(); return d ? d.handouts.map(h => h.id) : []; }
+function markBoardSeen() {
+  try { localStorage.setItem(SEEN_KEY, JSON.stringify(sharedIds())); } catch (e) {}
+}
+// A red dot on the Board button when something new has been pinned (or a
+// handout has been opened full-screen) while this player was on the map.
+function updateBoardBadge() {
+  const badge = document.querySelector('#remote-tool-board .rt-badge');
+  if (!badge) return;
+  if (board && board.isShown()) { markBoardSeen(); badge.classList.remove('on'); return; }
+  let seen = [];
+  try { seen = JSON.parse(localStorage.getItem(SEEN_KEY) || '[]'); } catch (e) {}
+  const d = boardDoc();
+  const fresh = sharedIds().some(id => !seen.includes(id)) || !!(d && d.focus && d.focus.length);
+  badge.classList.toggle('on', fresh);
+}
+
+// The GM looking through a player's eyes without making a token for it. The
+// server treats every request from this page as a tunnel visitor's, so hidden
+// NPCs, GM-only legend groups and un-shared handouts are simply not here.
+function enterPreview() {
+  S.myActorName = 'GM (preview)';
+  S.myActorId = 'gm-preview';
+  S.remoteClaimId = null;
+  S._remoteRestoreDone = true;
+  S.remoteScreen = 'play';
+  document.title = 'GM Display — Player preview';
+  document.getElementById('remote-select').style.display = 'none';
+  document.getElementById('remote-stage').style.display = 'flex';
+  document.getElementById('remote-bar').style.display = 'flex';
+  document.getElementById('remote-who').textContent = '👁 Player preview';
+  const dot = document.getElementById('remote-color-dot'); if (dot) dot.style.display = 'none';
+  const ch = document.getElementById('remote-change-btn'); if (ch) ch.style.display = 'none';
+  requestAnimationFrame(() => { renderRemoteFrame(); renderRemoteTokens(); });
+  setRemoteTool(savedTool());
 }
 
 // After a refresh the player lands on the roster; if they still hold their
@@ -242,6 +350,9 @@ export function remoteChangeCharacter() {
   localStorage.removeItem('gm-display:remote:claim');
   S.remoteScreen = 'select';
   S.remoteMarkerMode = false;
+  if (board) board.hide();
+  const rb = document.getElementById('remote-board'); if (rb) rb.style.display = 'none';
+  const rv = document.getElementById('remote-view'); if (rv) rv.classList.remove('board-mode');
   document.getElementById('remote-marker-btn').classList.remove('active');
   document.getElementById('remote-stage').style.display = 'none';
   document.getElementById('remote-bar').style.display = 'none';
@@ -256,8 +367,35 @@ function renderRemoteRoster() {
   if (!wrap) return;
   // Players only choose from player characters; NPCs are never claimable.
   const pcs = S.tokens.filter(t => t.side === 'pc');
-  if (!pcs.length) { wrap.innerHTML = '<div class="remote-empty">No characters yet — the GM hasn\'t added any.</div>'; return; }
+  if (!pcs.length && !remoteIsGM()) { wrap.innerHTML = '<div class="remote-empty">No characters yet — the GM hasn\'t added any.</div>'; return; }
   wrap.innerHTML = '';
+  // On the GM's own machine this page is a second pair of hands, not a seat at
+  // the table: a way to work the map from a tablet or a phone while standing
+  // up. So there is a way in that claims nobody.
+  if (remoteIsGM()) {
+    // ...and a way to see exactly what the players see, without a token.
+    const pv = document.createElement('div');
+    pv.className = 'remote-card gm';
+    pv.innerHTML = '<div class="rc-portrait" style="background:#2a2a30;border-color:#5fd0ff;">👁</div>'
+      + '<div class="rc-name">Preview as a player</div>'
+      + '<div class="rc-status">What the table sees · no token needed</div>';
+    pv.onclick = () => { location.href = 'remote.html?preview=1'; };
+    wrap.appendChild(pv);
+    const card = document.createElement('div');
+    card.className = 'remote-card gm';
+    const por = document.createElement('div');
+    por.className = 'rc-portrait';
+    por.style.background = '#2a2a30'; por.textContent = 'GM';
+    por.style.borderColor = '#ffcf5c';
+    const name = document.createElement('div');
+    name.className = 'rc-name'; name.textContent = 'Open as GM';
+    const status = document.createElement('div');
+    status.className = 'rc-status';
+    status.textContent = 'Move any token · double-tap to hide or reveal';
+    card.append(por, name, status);
+    card.onclick = enterAsGM;
+    wrap.appendChild(card);
+  }
   const savedName = localStorage.getItem('gm-display:remote:name');
   pcs.forEach(t => {
     const mine = !!t.owner && t.owner === savedName;       // your own (after a refresh)
@@ -293,8 +431,54 @@ export function remoteToggleMarker() {
   document.getElementById('remote-marker-btn').classList.toggle('active', S.remoteMarkerMode);
   if (S.remoteMarkerMode && remoteNotesMode) remoteToggleNotes();
 }
+// Is this the GM's own browser looking at the player page? The server answers
+// that from the socket the request came in on — it is not something this page
+// can decide about itself, and not something a visitor can claim. When it is
+// true the page stops being a petitioner: drags commit instead of proposing,
+// and hidden tokens are drawn (faded) because the server sent them.
+function remoteIsGM() { return !!S.remoteIsGM; }
+
+// --- GM login from any device ------------------------------------------------
+// On the GM's own Mac this page already knows it is the GM. Anywhere else —
+// a tablet on the wifi, a laptop through the tunnel — the GM types the code
+// shown in the GM page's Displays panel and the server remembers this browser.
+function updateGmLoginUI() {
+  const b = document.getElementById('remote-gm-login');
+  if (!b) return;
+  if (S.previewMode || (S.remoteIsGM && !S.remoteGmLogin)) { b.parentElement.style.display = 'none'; return; }
+  b.parentElement.style.display = '';
+  b.textContent = S.remoteGmLogin ? 'GM log out' : 'GM login';
+}
+
+export async function remoteGmLoginClick() {
+  const st = document.getElementById('remote-gm-status');
+  const say = (t) => { if (st) st.textContent = t || ''; };
+  if (S.remoteGmLogin) {
+    await fetch('/api/gm-logout', { method: 'POST' }).catch(() => {});
+    say('logged out');
+    remoteSyncTick();
+    return;
+  }
+  const code = prompt('GM code (shown in the Displays panel of the GM page):');
+  if (!code) return;
+  say('checking…');
+  try {
+    const r = await fetch('/api/gm-login', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({ code }) });
+    const d = await r.json();
+    if (!r.ok) { say(d.error || 'no'); return; }
+    say('');
+    remoteSyncTick();
+  } catch (e) { say('could not reach the GM’s server'); }
+}
+
 function remoteSyncTick() {
   fetch('/api/sync').then(r => r.json()).then(s => {
+    const wasGM = S.remoteIsGM;
+    S.remoteIsGM = !!s.local;
+    S.remoteGmLogin = !!s.gmLogin;
+    if (wasGM !== S.remoteIsGM && S.remoteScreen === 'select') renderRemoteRoster();
+    updateGmLoginUI();
     // markers from everyone else
     (s.markers || []).forEach(m => { if (m.by !== S.myActorName) S.activeMarkers[m.id] = { ...m, t: Date.now() }; });
     ensureMarkerLoop();
@@ -336,9 +520,41 @@ export function remoteToggleNotes() {
   // Marker mode and notes mode both want the tap; last one on wins.
   if (remoteNotesMode && S.remoteMarkerMode) remoteToggleMarker();
   if (remoteNotesMode && remoteLegendOpen) remoteToggleLegend();  // one sheet at a time
+  if (remoteNotesMode && remoteLogOpen) remoteToggleLog();
   if (!remoteNotesMode) { remoteCell = null; remoteNoteDraft = null; remoteNoteStatus = ''; }
   renderRemoteNotePanel();
   drawRemoteNotePips();
+}
+
+// --- the party's log, on the player's own screen -----------------------------
+// What everyone has written on this map, oldest first. The players have the
+// same right to re-read their own notes as the GM does, and at the table the
+// question is usually "when did we see that" rather than "which hex was it".
+let remoteLogOpen = false;
+
+export function remoteToggleLog() {
+  remoteLogOpen = !remoteLogOpen;
+  const b = document.getElementById('remote-log-btn');
+  if (b) b.classList.toggle('active', remoteLogOpen);
+  if (remoteLogOpen && remoteNotesMode) remoteToggleNotes();    // one sheet at a time
+  if (remoteLogOpen && remoteLegendOpen) remoteToggleLegend();
+  renderRemoteLog();
+}
+
+// Each name in the log wears that player's own colour, the same one their ink
+// and their token already carry, so you can tell at a glance whose line it is.
+function playerColor(name) {
+  if (name === S.myActorName) return S.remotePlayerColor;
+  const t = (S.tokens || []).find(x => x.owner === name);
+  return (t && (t.ownerColor || t.color)) || '';
+}
+
+function renderRemoteLog() {
+  const panel = document.getElementById('remote-log-panel');
+  if (!panel) return;
+  panel.style.display = remoteLogOpen ? 'block' : 'none';
+  if (!remoteLogOpen) { panel.innerHTML = ''; return; }
+  panel.innerHTML = '<div class="party-log">' + partyLogHTML(playerColor) + '</div>';
 }
 
 // --- the legend, on the player's own screen ---------------------------------
@@ -351,6 +567,7 @@ export function remoteToggleLegend() {
   const b = document.getElementById('remote-legend-btn');
   if (b) b.classList.toggle('active', remoteLegendOpen);
   if (remoteLegendOpen && remoteNotesMode) remoteToggleNotes();  // one sheet at a time
+  if (remoteLegendOpen && remoteLogOpen) remoteToggleLog();
   renderRemoteLegend();
 }
 
@@ -437,12 +654,17 @@ function attachRemoteNoteHandler() {
     const r = c.getBoundingClientRect();
     const m = remoteCanvasToMap(e.clientX - r.left, e.clientY - r.top);
     const label = cellLabel(cellAtMapPx(m.x, m.y, S.remoteFrame.width, S.remoteFrame.height));
-    if (label !== remoteCell) { remoteNoteDraft = null; remoteNoteStatus = ''; }
+    if (label !== remoteCell) { remoteNoteDraft = null; remoteNoteStatus = ''; remoteEditAt = null; }
     remoteCell = label;
     renderRemoteNotePanel(true);
     drawRemoteNotePips();
   });
 }
+
+// Which of your own entries the box is currently editing. Null means the box
+// is for a NEW note — which is the normal state, because coming back to a hex
+// usually means you have something to add, not something to take back.
+let remoteEditAt = null;
 
 function renderRemoteNotePanel(focusIt) {
   const panel = document.getElementById('remote-note-panel');
@@ -452,44 +674,106 @@ function renderRemoteNotePanel(focusIt) {
     panel.innerHTML = '<div class="remote-empty">Tap a hex or square to write on it.</div>';
     return;
   }
-  const mine = partyNotesFor(remoteCell).find(e => e.by === S.myActorName);
-  const others = partyNotesFor(remoteCell).filter(e => e.by !== S.myActorName);
+  const all = partyNotesFor(remoteCell);
+  // The entry being edited may have been removed by the poll underneath us.
+  if (remoteEditAt && !all.some(e => e.by === S.myActorName && e.at === remoteEditAt)) {
+    remoteEditAt = null; remoteNoteDraft = null;
+  }
+  const editing = remoteEditAt
+    ? all.find(e => e.by === S.myActorName && e.at === remoteEditAt) : null;
+
   // The 4s poll re-renders this panel. Remember where the caret was so a
   // re-render never yanks it out of the box mid-sentence.
   const prevTa = document.getElementById('remote-note-text');
   const wasFocused = prevTa && document.activeElement === prevTa;
   const caret = prevTa ? prevTa.selectionStart : 0;
+
+  const esc = (t) => String(t == null ? '' : t).replace(/[<>&"]/g,
+    ch => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[ch]));
+  const hhmm = (at) => {
+    const m = /\d{4}-\d{2}-\d{2} (\d{2}:\d{2})/.exec(at || '');
+    return m ? m[1] : '';
+  };
+
+  // Everything already on this hex, oldest first, yours and everyone else's.
+  // Yours carry the two buttons; theirs are not yours to touch.
+  const written = all.length
+    ? '<div class="rn-list">' + all.map(e => {
+        const mine = e.by === S.myActorName;
+        return '<div class="rn-entry' + (mine ? ' mine' : '')
+          + (remoteEditAt && mine && e.at === remoteEditAt ? ' editing' : '') + '">'
+          + '<div class="rn-meta"><b>' + esc(e.by || 'a player') + '</b>'
+          + (hhmm(e.at) ? '<span class="rn-when">' + esc(hhmm(e.at)) + '</span>' : '')
+          + (e.edited ? '<span class="rn-when">edited</span>' : '')
+          + (mine ? '<span class="rn-acts">'
+              + '<button class="rn-mini" data-edit="' + esc(e.at || '') + '" title="Change this note">✎</button>'
+              + '<button class="rn-mini" data-del="' + esc(e.at || '') + '" title="Remove this note">🗑</button>'
+              + '</span>' : '')
+          + '</div><div class="rn-text">' + esc(e.text || '') + '</div></div>';
+      }).join('') + '</div>'
+    : '';
+
   panel.innerHTML =
     '<div style="font-weight:600;margin-bottom:4px;">Cell ' + remoteCell + '</div>'
-    + '<textarea id="remote-note-text" rows="3" placeholder="What did you notice here?"></textarea>'
+    + written
+    + '<textarea id="remote-note-text" rows="3" placeholder="'
+    + (editing ? 'Change your note…' : 'What did you notice here?') + '"></textarea>'
     + '<div style="display:flex;gap:6px;margin-top:4px;">'
-    + '<button id="remote-note-save">Save</button>'
+    + '<button id="remote-note-save">' + (editing ? 'Save change' : 'Add note') + '</button>'
+    + (editing ? '<button id="remote-note-cancel">Cancel</button>' : '')
     + '<span id="remote-note-status" style="font-size:11px;opacity:.7;align-self:center;">'
-    + remoteNoteStatus + '</span></div>'
-    + (others.length
-        ? '<div style="margin-top:8px;font-size:12px;opacity:.85;">'
-          + others.map(e => '<div><b>' + e.by.replace(/[<>&]/g, '') + '</b> — '
-              + e.text.replace(/[<>&]/g, '') + '</div>').join('') + '</div>'
-        : '');
+    + remoteNoteStatus + '</span></div>';
+
   const ta = document.getElementById('remote-note-text');
   // A draft beats the server copy, so the 4-second poll cannot wipe out what
   // the player is halfway through typing.
-  ta.value = remoteNoteDraft !== null ? remoteNoteDraft : (mine ? mine.text : '');
+  ta.value = remoteNoteDraft !== null ? remoteNoteDraft : (editing ? editing.text : '');
   ta.addEventListener('input', () => { remoteNoteDraft = ta.value; });
   // Tapping a hex means "I want to write here", so put the cursor in the box —
   // on a phone that is also what raises the keyboard. Re-renders from the poll
   // pass no flag, so they restore the caret instead of stealing it.
   if (focusIt) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
   else if (wasFocused) { ta.focus(); ta.setSelectionRange(caret, caret); }
+
+  const say = (t) => {
+    remoteNoteStatus = t;
+    const st = document.getElementById('remote-note-status');
+    if (st) st.textContent = t;
+  };
+
   document.getElementById('remote-note-save').addEventListener('click', async () => {
-    remoteNoteStatus = 'saving…';
-    document.getElementById('remote-note-status').textContent = remoteNoteStatus;
-    const ok = await savePartyNote(remoteCell, ta.value, S.myActorName);
-    remoteNoteStatus = ok ? 'saved' : 'could not save — is the GM’s server up?';
-    if (ok) remoteNoteDraft = null;
+    const text = ta.value;
+    if (!text.trim() && !remoteEditAt) { say('nothing to add'); return; }
+    say('saving…');
+    const ok = remoteEditAt
+      ? await editPartyNote(remoteCell, remoteEditAt, text, S.myActorName)
+      : await addPartyNote(remoteCell, text, S.myActorName);
+    say(ok ? 'saved' : 'could not save — is the GM’s server up?');
+    if (ok) { remoteNoteDraft = null; remoteEditAt = null; }
     renderRemoteNotePanel();
     drawRemoteNotePips();
   });
+
+  const cancel = document.getElementById('remote-note-cancel');
+  if (cancel) cancel.addEventListener('click', () => {
+    remoteEditAt = null; remoteNoteDraft = null; say('');
+    renderRemoteNotePanel(true);
+  });
+
+  panel.querySelectorAll('[data-edit]').forEach(b =>
+    b.addEventListener('click', () => {
+      remoteEditAt = b.dataset.edit; remoteNoteDraft = null; say('');
+      renderRemoteNotePanel(true);
+    }));
+  panel.querySelectorAll('[data-del]').forEach(b =>
+    b.addEventListener('click', async () => {
+      say('removing…');
+      const ok = await removePartyNote(remoteCell, b.dataset.del, S.myActorName);
+      say(ok ? 'removed' : 'could not remove — is the GM’s server up?');
+      if (ok && remoteEditAt === b.dataset.del) { remoteEditAt = null; remoteNoteDraft = null; }
+      renderRemoteNotePanel();
+      drawRemoteNotePips();
+    }));
 }
 
 // A pip on every cell the party has written on, so players can see their own
@@ -625,18 +909,26 @@ function renderRemoteTokens() {
   const dot = document.getElementById('remote-color-dot');
   if (dot) dot.style.background = myMarkerColor();
   const company = S.tokens.find(t => isParty(t) && t.onMap);
-  document.getElementById('remote-token-info').textContent =
-    mine ? ('Playing ' + tokenDisplayName(mine)
+  const gm = remoteIsGM() && !S.remoteClaimId;
+  document.getElementById('remote-token-info').textContent = S.previewMode
+    ? 'Previewing what the players see — hidden tokens are not sent to this page'
+    : gm
+    ? 'GM — drag any token, double-tap to hide or reveal'
+    : (mine ? ('Playing ' + tokenDisplayName(mine)
             + (company ? ' — drag ' + tokenDisplayName(company) + ' to move the party'
                        : ' — drag to move'))
-         : '';
-  // Draw only tokens the GM has made visible on this map (onMap is per-map).
-  S.tokens.filter(t => t.onMap).forEach(t => {
+         : '');
+  // Players only ever see what the GM has revealed on this map — and for an
+  // NPC that is not a filter, it is all the server sent them. The GM's own
+  // browser gets the hidden ones too, faded, to place and walk around.
+  S.tokens.filter(t => t.onMap || gm).forEach(t => {
     // The Company belongs to the whole table, so anyone who has joined may
     // propose its move — it is not one player's piece to hold.
-    const canControl = (t.id === S.remoteClaimId) || (isParty(t) && !!S.myActorName);
-    layer.appendChild(makeRemoteTokenEl(t, t.tx, t.ty, diamPx * tokenFrac(t) / TOKEN_FRAC,
-                                        false, canControl));
+    const canControl = !S.previewMode && (gm || (t.id === S.remoteClaimId) || (isParty(t) && !!S.myActorName));
+    const el = makeRemoteTokenEl(t, t.tx, t.ty, diamPx * tokenFrac(t) / TOKEN_FRAC,
+                                 false, canControl);
+    if (!t.onMap) el.classList.add('unseen');
+    layer.appendChild(el);
     if (t.pending) layer.appendChild(makeRemoteTokenEl(t, t.pending.tx, t.pending.ty,
                                         diamPx * tokenFrac(t) / TOKEN_FRAC, true, false));
   });
@@ -662,6 +954,18 @@ function makeRemoteTokenEl(t, tx, ty, diamPx, isGhost, canControl) {
   el.appendChild(lab);
   if (t.num > 0) { const n = document.createElement('span'); n.className = 'tok-num'; n.textContent = t.num; el.appendChild(n); }
   if (canControl && !isGhost) attachRemoteTokenDrag(el, t);
+  // Reveal is the beat the whole ambush turns on, and it happens mid-round with
+  // the GM's hands nowhere near the laptop. Double-tap flips it.
+  if (!isGhost && remoteIsGM() && !S.remoteClaimId) {
+    el.title = (t.onMap ? 'Visible' : 'Hidden — only you see this')
+      + ' · double-tap to ' + (t.onMap ? 'hide' : 'reveal');
+    el.addEventListener('dblclick', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      t.onMap = !t.onMap;                    // optimistic; the GM page confirms
+      sendAction({ kind: 'gmvis', tokenId: t.id, onMap: t.onMap });
+      renderRemoteTokens();
+    });
+  }
   return el;
 }
 function attachRemoteTokenDrag(el, t) {
@@ -685,7 +989,11 @@ function attachRemoteTokenDrag(el, t) {
       el.releasePointerCapture(e.pointerId);
       el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', up);
       const s = snapNorm(last.tx, last.ty);
-      sendAction({ kind: 'propose', tokenId: t.id, player: S.myActorName, tx: s.tx, ty: s.ty });
+      // A player proposes and waits for a ✓. The GM, on their own machine, is
+      // the person who would be ticking it — so the move just happens.
+      sendAction(remoteIsGM() && !S.remoteClaimId
+        ? { kind: 'gmmove', tokenId: t.id, tx: s.tx, ty: s.ty }
+        : { kind: 'propose', tokenId: t.id, player: S.myActorName, tx: s.tx, ty: s.ty });
     };
     el.addEventListener('pointermove', move); el.addEventListener('pointerup', up);
   });

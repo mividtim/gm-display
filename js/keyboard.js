@@ -25,6 +25,8 @@ document.addEventListener('keydown', (e) => {
   }
   // Escape gets you out of whatever you are in, one step at a time: close an
   // open note, then drop to the None tool, and only then leave the map.
+  // The bulletin board has its own keys (Esc closes its full-screen view).
+  if (S.currentMode === 'board') return;
   if (e.key === 'Escape') {
     if (notePopOpen()) { closeNotePop(); return; }
     if (S.activeTool !== 'none') { setActiveTool('none'); return; }

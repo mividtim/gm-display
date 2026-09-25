@@ -44,6 +44,14 @@ _lock = threading.RLock()
 _vault_root = None
 _cache = {}       # path -> {'mtime': float, 'cells': {...}, 'title': str}
 _version = 1
+# server.py points this at resolve_map_key(): the player page only knows the
+# map by an opaque key, never by its filename.
+RESOLVE_MAP = None
+
+
+def _map_param(v):
+    v = v or ''
+    return RESOLVE_MAP(v) if (RESOLVE_MAP and v.startswith('mk-')) else v
 
 
 def init(vault_root):
@@ -165,6 +173,125 @@ def legend_path(map_src):
 
 
 # ---------------------------------------------------------------------------
+# the encounter — who is standing on this map before anyone opens it
+# ---------------------------------------------------------------------------
+# The last thing about a map that still had to be built by hand at the table.
+# A map could already arrive calibrated, captioned and split; the four things
+# waiting in ambush on it had to be typed in, named, given portraits and
+# dragged into place while the players watched.
+#
+# So: one more sidecar, beside the others, keyed on the same map identity.
+#
+#     Map Notes/<map>.tokens.json
+#     { "tokens": [
+#         { "base": "K'n-yan", "num": 1, "side": "npc", "color": "#6a4a8a",
+#           "img": "/maps/.tools/gm-display/agent-tokens/Knyan 1.png",
+#           "tx": 0.31, "ty": 0.44, "onMap": false } ] }
+#
+# `tx`/`ty` are map-normalized (0..1), the same coordinates a token carries
+# everywhere else, so an encounter survives the map being re-exported at a
+# different pixel size. `onMap: false` is the useful default for anything that
+# is meant to be a surprise — it lands hidden, and stays hidden until revealed.
+#
+# This is prep, not live state. It seeds a map the first time that browser
+# opens it and is never written back to afterwards, so moving a token at the
+# table does not rewrite the file the encounter was prepped in.
+
+def encounter_path(map_src):
+    d = notes_dir()
+    return os.path.join(d, _safe(map_src) + '.tokens.json') if d else None
+
+
+# A token definition is copied into the GM's roster, so it is worth being
+# strict about the shape here rather than letting a typo in a hand-written file
+# turn into an undraggable disc with no name.
+_HEX6 = re.compile(r'^#[0-9a-fA-F]{6}$')
+
+
+def _clean_token(t, i):
+    """One entry from an encounter file, or None if it is not usable."""
+    if not isinstance(t, dict):
+        return None
+    base = str(t.get('base') or t.get('name') or '').strip()[:60]
+    if not base:
+        return None
+    side = t.get('side')
+    if side not in ('pc', 'npc', 'party'):
+        side = 'npc'                      # an encounter is enemies by default
+    color = t.get('color') if _HEX6.match(str(t.get('color') or '')) else '#c0392b'
+
+    def frac(v, default):
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return default
+        return min(1.0, max(0.0, f))
+
+    return {
+        # The id has to be stable: it is what stops a second open of the map
+        # from seeding a duplicate set. Derived from the map and the entry, not
+        # random, and not something the file has to remember to supply.
+        'id': t.get('id') or None,
+        'base': base,
+        'num': int(t.get('num') or 0),
+        'side': side,
+        'color': color,
+        'img': _as_maps_url(t.get('img') or ''),
+        'tx': frac(t.get('tx'), 0.5),
+        'ty': frac(t.get('ty'), 0.5),
+        # Hidden unless the file says otherwise. Getting this backwards would
+        # put the ambush on the projector.
+        'onMap': bool(t.get('onMap', False)),
+    }
+
+
+def read_encounter(map_src):
+    """The encounter prepped for this map: {'tokens': [...]} or None."""
+    path = encounter_path(map_src)
+    if not path or not os.path.exists(path):
+        return None
+    try:
+        with open(path, encoding='utf-8') as f:
+            doc = json.load(f)
+    except Exception:
+        return None
+    # Accept both a bare list and the {"tokens": [...]} wrapper, because a GM
+    # writing one by hand in Obsidian will reach for either.
+    raw = doc.get('tokens') if isinstance(doc, dict) else doc
+    if not isinstance(raw, list):
+        return None
+    out = []
+    for i, t in enumerate(raw):
+        c = _clean_token(t, i)
+        if not c:
+            continue
+        if not c['id']:
+            # Stable, but not the map's name: token ids reach players' browsers.
+            import hashlib
+            c['id'] = 'enc-%s-%d' % (hashlib.sha1(_safe(map_src).encode('utf-8')).hexdigest()[:10], i)
+        out.append(c)
+    if not out:
+        return None
+    name = doc.get('name') if isinstance(doc, dict) else None
+    return {'tokens': out, 'name': str(name or '')[:80]}
+
+
+def write_encounter(map_src, doc):
+    """Save an encounter beside the map. Used by the sidebar's 'save' button;
+    the file is equally meant to be written by hand."""
+    path = encounter_path(map_src)
+    if not path:
+        return None
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(doc, f, indent=2, ensure_ascii=False)
+        f.write('\n')
+    os.replace(tmp, path)
+    return path
+
+
+# ---------------------------------------------------------------------------
 # markdown <-> dict
 # ---------------------------------------------------------------------------
 
@@ -244,7 +371,37 @@ def _save(map_src, cells):
 # party notes — a list of attributed entries per cell
 # ---------------------------------------------------------------------------
 
-_ENTRY = re.compile(r'^-\s*\*\*(.+?)\*\*\s*[—-]\s*(.*)$')
+# An entry carries WHEN it was written, so the party's notes can be read as a
+# log of the expedition and not only as an annotated map:
+#
+#     - **Sir Tim** (2026-09-17 00:44) — We camped here.
+#     - **Dame Ada** (2026-09-17 01:02 · edited 2026-09-17 09:15) — The ford is
+#
+# Local wall-clock time, minute precision: this is a record of a session at a
+# table, and "which came first" is the only question anyone asks of it. The
+# parenthesis is optional on the way IN — entries written before timestamps
+# existed, or typed into Obsidian by hand, still load. They simply have no
+# time, and the log puts them first because they are older than anything dated.
+_STAMP = r'\d{4}-\d{2}-\d{2} \d{2}:\d{2}(?::\d{2})?'
+_ENTRY = re.compile(
+    r'^-\s*\*\*(?P<by>.+?)\*\*\s*'
+    r'(?:\(\s*(?P<at>' + _STAMP + r')\s*'
+    r'(?:·\s*edited\s+(?P<edited>' + _STAMP + r')\s*)?\)\s*)?'
+    r'[—-]\s*(?P<text>.*)$')
+
+STAMP_FMT = '%Y-%m-%d %H:%M:%S'
+
+
+def now_stamp():
+    return time.strftime(STAMP_FMT, time.localtime())
+
+
+def _next_second(stamp):
+    try:
+        t = time.mktime(time.strptime(stamp, STAMP_FMT)) + 1
+        return time.strftime(STAMP_FMT, time.localtime(t))
+    except ValueError:
+        return stamp + ':01'
 
 
 def _parse_party(text):
@@ -254,7 +411,12 @@ def _parse_party(text):
         for line in body.split('\n'):
             m = _ENTRY.match(line.strip())
             if m:
-                entries.append({'by': m.group(1).strip(), 'text': m.group(2).strip()})
+                e = {'by': m.group('by').strip(), 'text': m.group('text').strip()}
+                if m.group('at'):
+                    e['at'] = m.group('at')
+                if m.group('edited'):
+                    e['edited'] = m.group('edited')
+                entries.append(e)
             elif line.strip():
                 entries.append({'by': '', 'text': line.strip()})
         if entries:
@@ -276,7 +438,11 @@ def _compose_party(map_src, cells):
         out += [f'## {cell}', '']
         for e in cells[cell]:
             who = e.get('by') or 'a player'
-            out.append(f"- **{who}** — {e.get('text', '').strip()}")
+            at, ed = e.get('at'), e.get('edited')
+            when = ''
+            if at:
+                when = f' ({at} · edited {ed})' if ed else f' ({at})'
+            out.append(f"- **{who}**{when} — {e.get('text', '').strip()}")
         out.append('')
     return '\n'.join(out)
 
@@ -476,11 +642,32 @@ def handle_get(h, parsed=None):
                   'file': key_path(map_src) or ''})
         return True
 
-    if parsed.path == '/api/partynotes':
+    # Who is waiting on this map. This is prep — half of it is things the
+    # players are not supposed to know are there — so it is answered to this
+    # machine and nowhere else, on the same reasoning as /api/notes below.
+    if parsed.path == '/api/encounter':
+        if h.is_remote():
+            _send(h, {'error': 'forbidden'}, 403)
+            return True
         q = urllib.parse.parse_qs(parsed.query)
         map_src = (q.get('map') or [''])[0]
+        path = encounter_path(map_src)
         with _lock:
-            _send(h, {'map': map_src, 'cells': _load_party(map_src), 'version': _version})
+            enc = read_encounter(map_src)
+        _send(h, {'map': map_src, 'encounter': enc,
+                  'file': path if (path and os.path.exists(path)) else ''})
+        return True
+
+    if parsed.path == '/api/partynotes':
+        q = urllib.parse.parse_qs(parsed.query)
+        asked = (q.get('map') or [''])[0]
+        map_src = _map_param(asked)
+        if not map_src:                     # an opaque key for a map no longer up
+            _send(h, {'map': asked, 'cells': {}, 'version': _version})
+            return True
+        with _lock:
+            # Echo back what was asked, never the resolved filename.
+            _send(h, {'map': asked, 'cells': _load_party(map_src), 'version': _version})
         return True
 
     # The legend is read by everyone — it is the map's own caption, and a
@@ -490,14 +677,17 @@ def handle_get(h, parsed=None):
     # on the way out to the table.
     if parsed.path == '/api/legend':
         q = urllib.parse.parse_qs(parsed.query)
-        map_src = (q.get('map') or [''])[0]
-        path = legend_path(map_src)
+        asked = (q.get('map') or [''])[0]
+        map_src = _map_param(asked)
+        path = legend_path(map_src) if map_src else None
         with _lock:
-            groups = _load_legend(map_src)
-        if h.is_remote():
+            groups = _load_legend(map_src) if map_src else []
+        remote = h.is_remote()
+        if remote:
             groups = _public_legend(groups)
-        _send(h, {'map': map_src, 'groups': groups,
-                  'file': path if (path and os.path.exists(path)) else '',
+        _send(h, {'map': asked, 'groups': groups,
+                  # The legend file is named after the map: the GM's to know.
+                  'file': '' if remote else (path if (path and os.path.exists(path)) else ''),
                   'count': sum(len(g['entries']) for g in groups)})
         return True
 
@@ -531,10 +721,14 @@ def handle_post(h, parsed=None):
         except Exception:
             _send(h, {'error': 'bad body'}, 400)
             return True
-        map_src = body.get('map') or ''
+        map_src = _map_param(body.get('map') or '')
         cell = str(body.get('cell') or '').strip()
         who = (str(body.get('by') or 'a player').strip())[:40]
         text = str(body.get('text') or '').strip()[:2000]
+        # Which existing entry this is about. Absent means "a new one" — a hex
+        # visited twice is two observations, and the second must not silently
+        # erase the first.
+        at = str(body.get('at') or '').strip()
         if not map_src or not cell:
             _send(h, {'error': 'map and cell required'}, 400)
             return True
@@ -543,15 +737,75 @@ def handle_post(h, parsed=None):
             return True
         with _lock:
             cells = {k: list(v) for k, v in _load_party(map_src, force=True).items()}
-            entries = [e for e in cells.get(cell, []) if e.get('by') != who]
-            if text:
-                entries.append({'by': who, 'text': text})
+            entries = list(cells.get(cell, []))
+            stamp = now_stamp()
+
+            if at:
+                # Addressing an entry that already exists: yours to change or
+                # to take back, and nobody else's.
+                idx = next((i for i, e in enumerate(entries)
+                            if e.get('by') == who and e.get('at') == at), None)
+                if idx is None:
+                    _send(h, {'error': 'no such entry'}, 404)
+                    return True
+                if not text:
+                    entries.pop(idx)
+                else:
+                    was = entries[idx]
+                    e = {'by': who, 'text': text, 'at': was.get('at') or stamp}
+                    if was.get('text') != text:
+                        e['edited'] = stamp
+                    elif was.get('edited'):
+                        e['edited'] = was['edited']
+                    entries[idx] = e
+            elif text:
+                # A new observation. Two notes on one hex in the same second
+                # would be indistinguishable afterwards, so nudge the later
+                # one along rather than let them collide.
+                while any(e.get('by') == who and e.get('at') == stamp for e in entries):
+                    stamp = _next_second(stamp)
+                entries.append({'by': who, 'text': text, 'at': stamp})
+            else:
+                _send(h, {'error': 'nothing to add'}, 400)
+                return True
+
             if entries:
                 cells[cell] = entries
             else:
                 cells.pop(cell, None)
             _save_party(map_src, cells)
-            _send(h, {'ok': True, 'version': _version})
+            _send(h, {'ok': True, 'version': _version, 'at': stamp})
+        return True
+
+    # Save the tokens now on this map back to the vault as its encounter, so a
+    # setup built by dragging can be kept and re-run — the same file a GM would
+    # write by hand. Prep, so the GM only.
+    if parsed.path == '/api/encounter':
+        if h.is_remote():
+            _send(h, {'error': 'forbidden'}, 403)
+            return True
+        try:
+            n = int(h.headers.get('Content-Length', 0))
+            body = json.loads(h.rfile.read(n).decode()) if n else {}
+        except Exception:
+            _send(h, {'error': 'bad body'}, 400)
+            return True
+        map_src = body.get('map') or ''
+        if not map_src:
+            _send(h, {'error': 'map required'}, 400)
+            return True
+        if not notes_dir():
+            _send(h, {'error': 'no vault'}, 503)
+            return True
+        toks = [t for t in (_clean_token(t, i) or {}
+                            for i, t in enumerate(body.get('tokens') or []))
+                if t]
+        with _lock:
+            path = write_encounter(map_src, {
+                'name': str(body.get('name') or '')[:80],
+                'tokens': toks,
+            })
+        _send(h, {'ok': True, 'file': path or '', 'count': len(toks)})
         return True
 
     # Starting a legend writes a template into the vault for the GM to fill in

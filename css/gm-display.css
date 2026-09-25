@@ -930,6 +930,28 @@ body {
 }
 .token.draggable { cursor: grab; }
 .token.draggable:active { cursor: grabbing; }
+/* A token that is on the board but not on the table. It only ever renders on a
+   surface the GM is looking at — the projector and the players' page draw what
+   `onMap` allows, and the server does not send them the rest — so this styling
+   exists to answer one question at a glance: which of these can they see? */
+.token.unseen {
+  opacity: 0.45;
+  border-style: dashed;
+  border-color: #b98cff;
+}
+.token.unseen .tok-fill { filter: grayscale(0.65); }
+.token.unseen::after {
+  content: '';
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  border: 1px dotted rgba(185, 140, 255, 0.7);
+  pointer-events: none;
+}
+/* The GM's own way onto the player page: not a character, so not a card that
+   looks like one. */
+.remote-card.gm { border-color: #8a6a1e; }
+.remote-card.gm .rc-name { color: #ffe6a8; }
 .token.ghost {
   filter: grayscale(1);
   opacity: 0.5;
@@ -1192,3 +1214,357 @@ body {
   text-align: center;
 }
 #remote-join-status.bad { color: #e8a0a0; }
+
+/* === The party's notes as a log === */
+/* One stylesheet for both pages: the GM reads this in the sidebar, the players
+   read it in a sheet over the map, and it is the same list either way. The row
+   is a grid so the times line up into a column you can scan down. */
+.party-log {
+  max-height: 260px; overflow-y: auto;
+  margin-top: 6px; padding: 2px 0;
+  border-top: 1px solid #333;
+  font-size: 12px; line-height: 1.5;
+}
+.party-log .pl-day {
+  position: sticky; top: 0; z-index: 1;
+  margin: 6px 0 2px; padding: 3px 0 2px;
+  background: #16161a;
+  color: #8b7355; font-size: 10px; font-weight: 700;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  border-bottom: 1px solid #2a2a30;
+}
+.party-log .pl-day:first-child { margin-top: 0; }
+.party-log .pl-row {
+  display: grid;
+  grid-template-columns: 38px 42px auto;
+  grid-template-areas: "time cell by" "time cell text";
+  gap: 0 6px;
+  padding: 4px 0;
+  border-bottom: 1px dotted #2a2a30;
+}
+.party-log .pl-time {
+  grid-area: time;
+  color: #777; font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.party-log .pl-cell {
+  grid-area: cell;
+  color: #60a5fa; font-weight: 700; cursor: pointer; white-space: nowrap;
+}
+.party-log .pl-cell:hover { text-decoration: underline; }
+.party-log .pl-by { grid-area: by; color: #9aa4b2; font-weight: 700; }
+.party-log .pl-text { grid-area: text; color: #ddd; word-break: break-word; }
+.party-log .pl-edited { color: #666; font-style: italic; }
+.party-log .pl-empty { color: #666; padding: 10px 0; text-align: center; }
+
+/* On the player page the log is a sheet like the legend, and the rows are
+   read at arm's length on a phone rather than at a desk. */
+#remote-log-panel {
+  display: none;
+  position: absolute; left: 0; right: 0; bottom: 46px;
+  max-height: 52vh; overflow-y: auto;
+  padding: 10px 12px 14px;
+  background: #16161a; border-top: 1px solid #333;
+}
+#remote-log-panel .party-log {
+  max-height: none; border-top: none; margin-top: 0; font-size: 13px;
+}
+#remote-log-panel .pl-cell { cursor: default; }
+#remote-log-panel .pl-cell:hover { text-decoration: none; }
+
+/* A hex accumulates notes, so the player's sheet lists what is already there
+   and the box underneath is for adding one more. Your own entries carry the
+   two buttons; everyone else's are not yours to touch. */
+#remote-note-panel .rn-list {
+  max-height: 24vh; overflow-y: auto;
+  margin: 2px 0 8px; padding-right: 2px;
+}
+#remote-note-panel .rn-entry {
+  padding: 5px 7px; margin-bottom: 4px;
+  background: #1d1d22; border: 1px solid #2d2d33; border-radius: 6px;
+  border-left: 3px solid #333;
+}
+#remote-note-panel .rn-entry.mine { border-left-color: #5fd0ff; }
+#remote-note-panel .rn-entry.editing { background: #23232b; border-color: #5fd0ff; }
+#remote-note-panel .rn-meta {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; color: #9aa4b2; margin-bottom: 2px;
+}
+#remote-note-panel .rn-meta b { color: #5fd0ff; }
+#remote-note-panel .rn-when { color: #6b7280; font-variant-numeric: tabular-nums; }
+#remote-note-panel .rn-acts { margin-left: auto; display: flex; gap: 2px; }
+#remote-note-panel .rn-mini {
+  padding: 2px 6px; font-size: 12px; line-height: 1;
+  background: #2a2a30; border: 1px solid #444; border-radius: 4px;
+  color: #ccc; cursor: pointer;
+}
+#remote-note-panel .rn-mini:hover { background: #34343c; color: #fff; }
+#remote-note-panel .rn-text { font-size: 13px; color: #ddd; word-break: break-word; }
+
+/* =====================================================================
+   Campaign bulletin board (js/board.js) — shared by the player page and
+   the GM page. Everything inside .bb-world is in BOARD units and scaled by
+   the shared zoom; --bb-inv (1/zoom) keeps pins and buttons a steady size.
+   ===================================================================== */
+.bb-root {
+  position: relative; overflow: hidden; user-select: none; -webkit-user-select: none;
+  background-color: #8a6440;
+  background-image:
+    radial-gradient(rgba(60,35,15,0.35) 1px, transparent 1.4px),
+    radial-gradient(rgba(255,230,190,0.18) 1px, transparent 1.6px),
+    linear-gradient(135deg, #9a7148, #7d5634);
+  background-size: 7px 7px, 11px 11px, 100% 100%;
+  background-position: 0 0, 3px 5px, 0 0;
+  color: #eee; font-family: system-ui, sans-serif;
+  --bb-inv: 1; --bb-yarn: #c0392b;
+}
+.bb-viewport { position: absolute; inset: 0; touch-action: none; cursor: grab; outline: none; }
+.bb-viewport.grabbing { cursor: grabbing; }
+.bb-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
+.bb-handouts, .bb-pins { position: absolute; left: 0; top: 0; }
+/* Handouts stack among themselves; yarn and pins always sit above the pile. */
+.bb-handouts { z-index: 0; }
+.bb-pins { z-index: 2; }
+.bb-empty {
+  position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; text-align: center; font-size: 20px; color: #f6e7cf;
+  text-shadow: 0 1px 2px #0008; pointer-events: none;
+}
+.bb-empty span { font-size: 14px; opacity: .8; margin-top: 6px; }
+
+.bb-handout {
+  position: absolute; background: #f4efe4; padding: 0;
+  box-shadow: 0 2px 4px rgba(0,0,0,.35), 0 10px 22px rgba(0,0,0,.35);
+  transform: rotate(var(--tilt, 0deg)); transform-origin: 50% 12px;
+}
+.bb-handout img { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+.bb-handout.selected { outline: calc(3px * var(--bb-inv)) solid #ffd76a; outline-offset: calc(2px * var(--bb-inv)); }
+.bb-cap {
+  position: absolute; left: 0; right: 0; top: 100%; margin-top: calc(4px * var(--bb-inv));
+  text-align: center; font-size: calc(12px * var(--bb-inv)); color: #fff6e6;
+  text-shadow: 0 1px 2px #000a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  pointer-events: none;
+}
+.bb-acts {
+  position: absolute; top: 0; right: 0; display: none; gap: 4px;
+  transform: scale(var(--bb-inv)); transform-origin: top right; padding: 4px;
+}
+.bb-handout:hover .bb-acts, .bb-handout.selected .bb-acts { display: flex; }
+.bb-act {
+  width: 30px; height: 30px; border-radius: 6px; border: 1px solid #0006;
+  background: rgba(20,16,12,.82); color: #fff; font-size: 16px; cursor: pointer; padding: 0;
+}
+.bb-act:hover { background: #3a2c1c; }
+.bb-resize {
+  position: absolute; right: 0; bottom: 0; width: 22px; height: 22px;
+  transform: scale(var(--bb-inv)); transform-origin: bottom right; cursor: nwse-resize;
+  background: linear-gradient(135deg, transparent 50%, rgba(20,16,12,.7) 50%); display: none;
+}
+.bb-handout:hover .bb-resize, .bb-handout.selected .bb-resize { display: block; }
+
+.bb-pin {
+  position: absolute; width: 22px; height: 22px; margin: -11px 0 0 -11px;
+  transform: scale(var(--bb-inv)); border-radius: 50%; cursor: move; z-index: 2;
+  background: radial-gradient(circle at 35% 30%, #ff8a80, #d32f2f 55%, #7f1010);
+  box-shadow: 0 2px 3px rgba(0,0,0,.55), inset 0 -2px 3px rgba(0,0,0,.3);
+}
+.bb-pin::after {
+  content: ''; position: absolute; left: 7px; top: 5px; width: 5px; height: 4px;
+  border-radius: 50%; background: rgba(255,255,255,.7);
+}
+
+.bb-yarn { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; z-index: 1; }
+.bb-string { fill: none; stroke: var(--bb-yarn); stroke-linecap: round;
+             filter: drop-shadow(0 1px 1px rgba(0,0,0,.5)); }
+.bb-string.live { stroke-dasharray: 6 5; opacity: .85; }
+.bb-string-hit { fill: none; stroke: transparent; pointer-events: stroke; cursor: pointer; }
+.bb-string-hit:hover + .bb-string { stroke-dasharray: 5 4; filter: drop-shadow(0 0 3px rgba(255,255,255,.7)); }
+
+.bb-toolbar {
+  position: absolute; left: 10px; top: 10px; display: flex; align-items: center; gap: 6px;
+  padding: 6px 8px; border-radius: 8px; background: rgba(18,14,10,.82);
+  box-shadow: 0 2px 8px #0007; font-size: 13px; z-index: 5; max-width: calc(100% - 20px); flex-wrap: wrap;
+}
+.bb-tb {
+  min-width: 32px; height: 30px; padding: 0 10px; border-radius: 6px; border: 1px solid #5a4a38;
+  background: #2a2119; color: #f3e6d2; cursor: pointer; font-size: 14px;
+}
+.bb-tb.active { background: var(--bb-yarn); border-color: #fff8; color: #fff; }
+.bb-zoom { min-width: 44px; text-align: center; color: #f3e6d2; font-variant-numeric: tabular-nums; }
+.bb-hint { color: #cdbba0; font-size: 12px; padding-left: 4px; }
+.bb-toast {
+  position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%);
+  background: #2a1414; color: #ffd6d6; border: 1px solid #7a3030; padding: 8px 14px;
+  border-radius: 8px; font-size: 13px; opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 20;
+}
+.bb-toast.on { opacity: 1; }
+
+/* The shared full-screen view. */
+.bb-modal {
+  position: absolute; inset: 0; z-index: 10; background: rgba(8,6,4,.86);
+  display: flex; align-items: stretch; justify-content: center;
+}
+.bb-modal-inner { flex: 1; display: flex; gap: 16px; padding: 52px 20px 20px; min-width: 0; }
+.bb-modal-close, .bb-modal-side {
+  position: absolute; top: 10px; height: 34px; border-radius: 8px; border: 1px solid #666;
+  background: #1c1916; color: #fff; cursor: pointer; font-size: 15px; z-index: 2;
+}
+.bb-modal-close { right: 12px; width: 38px; font-size: 18px; }
+.bb-modal-side { right: 60px; padding: 0 12px; font-size: 13px; }
+.bb-pane { flex: 1; min-width: 0; display: flex; flex-direction: column; background: #15120f;
+           border: 1px solid #3a3129; border-radius: 10px; overflow: hidden; }
+.bb-pane-head { display: flex; align-items: center; padding: 8px 12px; border-bottom: 1px solid #3a3129;
+                font-weight: 600; color: #f3e6d2; }
+.bb-pane-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bb-pane-x { background: none; border: none; color: #ccc; font-size: 16px; cursor: pointer; }
+.bb-pane-body { flex: 1; display: flex; min-height: 0; }
+.bb-pane-img { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center;
+               padding: 10px; background: #0c0a08; }
+.bb-pane-img img { max-width: 100%; max-height: 100%; object-fit: contain; box-shadow: 0 4px 20px #000; }
+.bb-notes { width: 320px; flex: none; display: flex; flex-direction: column; border-left: 1px solid #3a3129;
+            user-select: text; -webkit-user-select: text; }
+.bb-n2 .bb-pane-body { flex-direction: column; }
+.bb-n2 .bb-notes { width: auto; height: 38%; border-left: none; border-top: 1px solid #3a3129; }
+.bb-notes-head { padding: 8px 12px 4px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: #a8957a; }
+.bb-notes-list { flex: 1; overflow-y: auto; padding: 4px 12px; }
+.bb-notes-empty { color: #8a7a64; font-size: 13px; padding: 8px 0; }
+.bb-note { background: #fff7c8; color: #2b2410; border-radius: 3px; padding: 8px 10px; margin: 0 0 8px;
+           box-shadow: 0 1px 3px #0008; font-size: 14px; line-height: 1.4; }
+.bb-note.gm { background: #d9e8ff; }
+.bb-note.editing { outline: 2px solid #ffb300; }
+.bb-note-text { white-space: pre-wrap; word-wrap: break-word; }
+.bb-note-foot { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 12px; color: #6b5a30; }
+.bb-note.gm .bb-note-foot { color: #2c4a7a; }
+.bb-note-by { font-weight: 700; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+              text-shadow: 0 0 1px rgba(0,0,0,.15); }
+.bb-as { font-weight: 400; opacity: .7; }
+.bb-info { position: relative; cursor: help; font-size: 14px; outline: none; }
+.bb-bubble {
+  display: none; position: absolute; right: -6px; bottom: 150%; width: 220px; z-index: 5;
+  background: #1c1916; color: #f3e6d2; border: 1px solid #5a4a38; border-radius: 8px;
+  padding: 8px 10px; font-size: 12px; line-height: 1.45; box-shadow: 0 4px 14px #000a; text-align: left;
+}
+.bb-bubble-float {
+  display: none; position: absolute; z-index: 30; width: 230px; pointer-events: none;
+  background: #1c1916; color: #f3e6d2; border: 1px solid #5a4a38; border-radius: 8px;
+  padding: 8px 10px; font-size: 12px; line-height: 1.45; box-shadow: 0 4px 14px #000a;
+}
+.bb-note-acts button { background: none; border: none; cursor: pointer; font-size: 13px; padding: 0 2px; }
+.bb-compose { padding: 8px 12px 12px; border-top: 1px solid #3a3129; }
+.bb-compose textarea { width: 100%; box-sizing: border-box; resize: vertical; background: #221d18; color: #f3e6d2;
+  border: 1px solid #5a4a38; border-radius: 6px; padding: 7px; font: 14px/1.45 system-ui, sans-serif; }
+.bb-compose-row { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
+.bb-compose-row button { padding: 6px 12px; border-radius: 6px; border: 1px solid #5a4a38; background: #3a2c1c;
+  color: #fff; cursor: pointer; }
+.bb-note-status { font-size: 12px; color: #cdbba0; }
+.bb-picker { position: absolute; left: 20px; right: 20px; bottom: 20px; z-index: 3; background: #1c1916;
+  border: 1px solid #5a4a38; border-radius: 10px; padding: 10px; box-shadow: 0 6px 24px #000c; }
+.bb-picker-head { font-size: 12px; color: #cdbba0; margin-bottom: 8px; }
+.bb-picker-row { display: flex; gap: 10px; overflow-x: auto; }
+.bb-pick { flex: none; width: 110px; background: #0c0a08; border: 1px solid #3a3129; border-radius: 6px;
+  padding: 6px; color: #eee; cursor: pointer; font-size: 11px; }
+.bb-pick img { width: 100%; height: 80px; object-fit: contain; display: block; margin-bottom: 4px; }
+.bb-pick span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bb-picker-none { color: #8a7a64; font-size: 13px; }
+
+@media (max-width: 760px) {
+  .bb-modal-inner { flex-direction: column; padding: 52px 8px 8px; }
+  .bb-pane-body { flex-direction: column; }
+  .bb-notes { width: auto; height: 45%; border-left: none; border-top: 1px solid #3a3129; }
+  .bb-hint { display: none; }
+}
+
+/* --- player page: the Map | Board switch --------------------------------- */
+#remote-board {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 46px; display: none;
+}
+.remote-tools { display: inline-flex; border: 1px solid #555; border-radius: 7px; overflow: hidden; flex: none; }
+#remote-bar .remote-tools button { border: none; border-radius: 0; background: #1f1f24; padding: 7px 12px; position: relative; }
+#remote-bar .remote-tools button.on { background: #3a2c1c; color: #ffe6a8; }
+.remote-tools .rt-badge { position: absolute; top: 3px; right: 3px; width: 8px; height: 8px; border-radius: 50%;
+  background: #ff5a4a; box-shadow: 0 0 6px #ff5a4a; display: none; }
+.remote-tools .rt-badge.on { display: block; }
+#remote-view.board-mode .map-only { display: none !important; }
+
+/* --- GM page: the board view and handout sharing -------------------------- */
+#view-board { position: relative; }
+#gm-board { position: absolute; inset: 0; }
+.lib-share {
+  position: absolute; left: 3px; bottom: 18px; width: 22px; height: 22px; border-radius: 50%;
+  border: 1px solid #555; background: rgba(20,20,24,.85); color: #bbb; font-size: 12px; line-height: 20px;
+  padding: 0; cursor: pointer; z-index: 2; text-align: center;
+}
+.lib-share.on { background: #b3261e; border-color: #ff8a80; color: #fff; }
+#handout-share-float {
+  position: absolute; right: 14px; top: 52px; z-index: 30; display: none;
+  padding: 8px 14px; border-radius: 8px; border: 1px solid #8a6a1e; background: #2a2214; color: #ffe6a8;
+  font-size: 13px; cursor: pointer; box-shadow: 0 2px 10px #000a;
+}
+#handout-share-float.on { background: #3a1616; border-color: #b3261e; color: #ffd6d6; }
+#board-shared-list { display: flex; flex-direction: column; gap: 3px; max-height: 200px; overflow: auto; margin-top: 6px; }
+.bsl-row { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #ccc; }
+.bsl-row img { width: 28px; height: 28px; object-fit: cover; border-radius: 3px; background: #222; }
+.bsl-row span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bsl-row small { color: #777; }
+.bsl-row button { padding: 1px 6px; font-size: 10px; }
+
+/* A cut-out handout: no paper behind it, and a shadow that follows the shape. */
+.bb-handout.cutout { background: transparent; box-shadow: none; }
+.bb-handout.cutout img { filter: drop-shadow(0 2px 3px rgba(0,0,0,.45)) drop-shadow(0 8px 14px rgba(0,0,0,.3)); }
+/* Where a dragged yarn end will land. */
+.bb-handout.bb-yarn-target { outline: calc(3px * var(--bb-inv)) dashed var(--bb-yarn); outline-offset: calc(4px * var(--bb-inv)); }
+
+/* The loose end of yarn hanging off every pin: drag it to connect. */
+.bb-tail {
+  position: absolute; width: 34px; height: 46px; margin: -2px 0 0 -2px;
+  transform: scale(var(--bb-inv)); transform-origin: 2px 2px; z-index: 1;
+  cursor: grab; touch-action: none;
+}
+.bb-tail svg { display: block; overflow: visible; pointer-events: none; }
+.bb-tail-yarn, .bb-tail-fray { fill: none; stroke: var(--bb-yarn); stroke-linecap: round; }
+.bb-tail-yarn { stroke-width: 3; filter: drop-shadow(0 1px 1px rgba(0,0,0,.5)); }
+.bb-tail-fray { stroke-width: 1.4; }
+.bb-tail-grab { fill: transparent; }
+.bb-tail:hover .bb-tail-yarn { stroke-width: 4; }
+
+/* A pile of post-its: how many notes a handout has, at a glance. */
+.bb-notes-stack {
+  position: absolute; right: -6px; bottom: -6px; width: 34px; height: 34px; padding: 0;
+  border: none; background: none; cursor: pointer;
+  transform: scale(var(--bb-inv)); transform-origin: bottom right;
+}
+.bb-postit {
+  position: absolute; right: calc(var(--k) * 3px); bottom: calc(var(--k) * 3px);
+  width: 28px; height: 28px; background: #ffe16b; border-radius: 1px;
+  box-shadow: 0 1px 2px rgba(0,0,0,.45);
+  transform: rotate(calc((var(--k) - 1) * 5deg));
+}
+.bb-postit:nth-child(1) { background: #f7d24a; }
+.bb-postit:nth-child(2) { background: #fbd85a; }
+.bb-postit-n {
+  position: absolute; right: 0; bottom: 0; width: 28px; height: 28px; line-height: 28px;
+  text-align: center; font: 700 14px/28px 'Marker Felt', 'Comic Sans MS', system-ui, sans-serif; color: #5a4300;
+}
+.bb-notes-stack:hover .bb-postit { filter: brightness(1.06); }
+
+
+/* GM login on the player join screen: small, out of the players' way. */
+#remote-gm-row { margin-top: 14px; text-align: right; font-size: 12px; color: #888; }
+#remote-gm-login { background: none; border: 1px solid #444; color: #999; border-radius: 5px;
+                   padding: 3px 10px; font-size: 11px; cursor: pointer; }
+#remote-gm-login:hover { color: #ffe6a8; border-color: #8a6a1e; }
+#remote-gm-status { margin-left: 6px; }
+
+/* Scissors near both ends of a string, shown when you are near it. */
+.bb-snips { position: absolute; left: 0; top: 0; z-index: 3; }
+.bb-snip {
+  position: absolute; width: 22px; height: 22px; margin: -11px 0 0 -11px; padding: 0;
+  transform: scale(var(--bb-inv)); border-radius: 50%; border: 1px solid rgba(255,255,255,.7);
+  background: rgba(20,14,10,.85); color: #fff; font-size: 12px; line-height: 20px; cursor: pointer;
+  opacity: 0; pointer-events: none; transition: opacity .12s;
+}
+.bb-snip.on { opacity: 1; pointer-events: auto; }
+.bb-snip:hover { background: #b3261e; border-color: #fff; }
+
+/* A filename only the GM can see (players get no caption until it is titled). */
+.bb-cap.gm-only, .bb-pane-title.gm-only { opacity: .55; font-style: italic; }
+.bb-cap.gm-only::before { content: '👁 '; font-style: normal; }
